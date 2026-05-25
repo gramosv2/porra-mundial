@@ -3,10 +3,8 @@
   "buildCommand": "next build",
   "devCommand": "next dev",
   "installCommand": "npm install",
-  "crons": [
-    {
-      "path": "/api/sync-results",
-      "schedule": "0 */2 * * *"
-    }
-  ]
+  "crons": [{
+    "path": "/api/sync-results",
+    "schedule": "0 2 * * *"
+  }]
 }
