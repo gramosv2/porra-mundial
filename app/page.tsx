@@ -23,17 +23,33 @@ export default async function HomePage() {
           🇺🇸 🇨🇦 🇲🇽 FIFA World Cup 2026 · 48 selecciones · 11 junio – 19 julio
         </div>
 
-        <h1 className="font-display text-5xl sm:text-7xl lg:text-8xl font-extrabold tracking-tight leading-[0.95] max-w-4xl">
-          Porra 🇺🇸🇨🇦🇲🇽{' '}
-          <span className="bg-gradient-to-br from-accent via-emerald-300 to-gold bg-clip-text text-transparent">
-		  FIFA World Cup 2026 🌎🏆
-          </span>{' '}
-          Win it all 💶💶
+        <h1 className="font-display font-extrabold tracking-tight leading-[1.05] max-w-4xl mt-2">
+          {/* Desktop: una sola línea grande */}
+          <span className="hidden lg:block text-5xl xl:text-6xl whitespace-nowrap">
+            Porra 🇺🇸🇨🇦🇲🇽 FIFA World Cup{' '}
+            <span className="bg-gradient-to-br from-accent via-emerald-300 to-gold bg-clip-text text-transparent">
+              2026
+            </span>{' '}
+            🌎🏆
+          </span>
+          <span className="hidden lg:block text-2xl xl:text-3xl text-text-muted font-semibold mt-3">
+            Win it all 💶💶
+          </span>
+
+          {/* Mobile: 4 líneas como en el navbar */}
+          <span className="lg:hidden flex flex-col gap-1">
+            <span className="text-4xl sm:text-5xl">Porra 🇺🇸🇨🇦🇲🇽</span>
+            <span className="text-4xl sm:text-5xl text-accent">FIFA World</span>
+            <span className="text-4xl sm:text-5xl">Cup 2026 🌎🏆</span>
+            <span className="text-2xl sm:text-3xl text-text-muted font-semibold mt-2">
+              Win it all 💶💶
+            </span>
+          </span>
         </h1>
 
         <p className="mt-6 text-text-muted text-lg max-w-2xl leading-relaxed">
-          Predice los 104 partidos del primer Mundial con 48 selecciones. Marcadores exactos,
-          premios individuales y clasificación en tiempo real. <span className="text-text">Win it all 💶💶</span>
+          La porra privada del Mundial entre amigos. Predice los 104 partidos del primer Mundial
+          con 48 selecciones. Marcadores exactos, premios individuales y clasificación en tiempo real.
         </p>
 
         <div className="mt-10 flex flex-wrap gap-4">
