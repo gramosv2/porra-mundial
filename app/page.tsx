@@ -20,7 +20,7 @@ export default async function HomePage() {
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-20 sm:py-32">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface/80 border border-border text-xs text-text-muted mb-8 backdrop-blur">
           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
-          Mundial FIFA 2026 · 48 selecciones · 11 junio – 19 julio
+          🇺🇸 🇨🇦 🇲🇽 FIFA World Cup 2026 · 48 selecciones · 11 junio – 19 julio
         </div>
 
         <h1 className="font-display text-5xl sm:text-7xl lg:text-8xl font-extrabold tracking-tight leading-[0.95] max-w-4xl">
@@ -28,12 +28,12 @@ export default async function HomePage() {
           <span className="bg-gradient-to-br from-accent via-emerald-300 to-gold bg-clip-text text-transparent">
             Mundial 2026
           </span>{' '}
-          entre amigos.
+          entre amigos. 🏆
         </h1>
 
         <p className="mt-6 text-text-muted text-lg max-w-2xl leading-relaxed">
           Predice los 104 partidos del primer Mundial con 48 selecciones. Marcadores exactos,
-          premios individuales y clasificación en tiempo real. Sin postureo, sólo gloria.
+          premios individuales y clasificación en tiempo real. <span className="text-text">Win it all 💶💶</span>
         </p>
 
         <div className="mt-10 flex flex-wrap gap-4">

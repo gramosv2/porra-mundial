@@ -36,9 +36,14 @@ export default function LoginPage() {
           <span>←</span> Volver
         </Link>
         <div className="bg-surface border border-border rounded-modal p-8">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-2xl">⚽</span>
-            <span className="font-display font-bold text-lg">PorraMundial 2026</span>
+          <div className="mb-2">
+            <div className="font-display font-bold text-base sm:text-lg leading-tight">
+              Porra 🇺🇸🇨🇦🇲🇽 FIFA World Cup{' '}
+              <span className="text-accent">2026</span> 🌎🏆
+            </div>
+            <div className="font-display text-xs sm:text-sm text-text-muted font-medium mt-0.5">
+              Win it all 💶💶
+            </div>
           </div>
           <h1 className="font-display text-3xl font-bold mt-4">Bienvenido de nuevo</h1>
           <p className="text-text-muted text-sm mt-2">Inicia sesión para seguir prediciendo</p>

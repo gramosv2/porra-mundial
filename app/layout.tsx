@@ -17,7 +17,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'PorraMundial 2026',
+  title: 'Porra 🇺🇸🇨🇦🇲🇽 FIFA World Cup 2026 🌎🏆 | Win it all 💶💶',
   description: 'La porra privada del Mundial FIFA 2026',
   icons: { icon: '/favicon.ico' },
 };
