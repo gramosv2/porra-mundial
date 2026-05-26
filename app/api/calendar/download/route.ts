@@ -1,12 +1,12 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/server';
 import { generateWorldCupICS } from '@/lib/calendar';
 import type { Match } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const supabase = createClient();
+export async function GET(req: NextRequest) {
+  const supabase = createAdminClient();
 
   const { data: matches, error } = await supabase
     .from('matches')
@@ -19,12 +19,18 @@ export async function GET() {
 
   const ics = generateWorldCupICS((matches ?? []) as Match[]);
 
+  const wantDownload = req.nextUrl.searchParams.get('download') === '1';
+  const disposition = wantDownload
+    ? 'attachment; filename="mundial2026.ics"'
+    : 'inline; filename="mundial2026.ics"';
+
   return new NextResponse(ics, {
     status: 200,
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="mundial2026.ics"',
+      'Content-Disposition': disposition,
       'Cache-Control': 'no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 }

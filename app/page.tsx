@@ -40,7 +40,7 @@ export default async function HomePage() {
           <span className="lg:hidden flex flex-col gap-1">
             <span className="text-4xl sm:text-5xl">Porra 🇺🇸🇨🇦🇲🇽</span>
             <span className="text-4xl sm:text-5xl text-accent">FIFA World</span>
-            <span className="text-4xl sm:text-5xl">Cup 2026 🌎🏆</span>
+            <span className="text-4xl sm:text-5xl text-accent">Cup 2026 🌎🏆</span>
             <span className="text-2xl sm:text-3xl text-text-muted font-semibold mt-2">
               Win it all 💶💶
             </span>

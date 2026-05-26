@@ -13,7 +13,39 @@ function toUtcStamp(iso: string): string {
 }
 
 function escapeIcs(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
+}
+
+/**
+ * RFC 5545 line folding: corta cada línea a max 75 octetos.
+ * Importante para iOS Safari / Calendar.app que son estrictos.
+ */
+function foldLine(line: string): string {
+  const encoder = new TextEncoder();
+  const MAX = 75;
+  if (encoder.encode(line).length <= MAX) return line;
+
+  const chunks: string[] = [];
+  let current = '';
+  let currentBytes = 0;
+
+  for (const ch of line) {
+    const chBytes = encoder.encode(ch).length;
+    if (currentBytes + chBytes > MAX) {
+      chunks.push(current);
+      current = ch;
+      currentBytes = chBytes;
+    } else {
+      current += ch;
+      currentBytes += chBytes;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks[0] + chunks.slice(1).map((c) => '\r\n ' + c).join('');
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -30,10 +62,10 @@ export function generateWorldCupICS(matches: Match[]): string {
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//PorraMundial2026//ES',
+    'PRODID:-//Porra FIFA 2026//ES',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:Mundial 2026',
+    'X-WR-CALNAME:Porra FIFA World Cup 2026',
     'X-WR-TIMEZONE:UTC',
     'X-WR-CALDESC:Calendario completo del Mundial FIFA 2026',
   ];
@@ -42,28 +74,30 @@ export function generateWorldCupICS(matches: Match[]): string {
 
   for (const m of matches) {
     const start = new Date(m.match_date);
-    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000); // 2h
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
 
     const phaseLabel = PHASE_LABEL[m.phase] ?? m.phase;
-    const summary = `⚽ ${teamES(m.team1)} vs ${teamES(m.team2)} — Mundial 2026`;
+    const summary = `${teamES(m.team1)} vs ${teamES(m.team2)} - Mundial 2026`;
     const descParts = [`Fase: ${phaseLabel}`];
-    if (m.group_name) descParts.push(`Grupo ${m.group_name} · Jornada ${m.matchday ?? '-'}`);
+    if (m.group_name) descParts.push(`Grupo ${m.group_name} - Jornada ${m.matchday ?? '-'}`);
     if (m.venue) descParts.push(`Sede: ${m.venue}`);
 
     lines.push(
       'BEGIN:VEVENT',
-      `UID:match-${m.id}@porramundial2026`,
+      `UID:match-${m.id}@porra-fifa-2026`,
       `DTSTAMP:${stamp}`,
       `DTSTART:${toUtcStamp(start.toISOString())}`,
       `DTEND:${toUtcStamp(end.toISOString())}`,
       `SUMMARY:${escapeIcs(summary)}`,
       `DESCRIPTION:${escapeIcs(descParts.join('\n'))}`,
       `LOCATION:${escapeIcs(m.venue ?? '')}`,
-      'DURATION:PT2H',
+      'STATUS:CONFIRMED',
+      'TRANSP:OPAQUE',
       'END:VEVENT'
     );
   }
 
   lines.push('END:VCALENDAR');
-  return lines.join('\r\n');
+
+  return lines.map(foldLine).join('\r\n') + '\r\n';
 }

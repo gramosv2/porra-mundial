@@ -2,8 +2,8 @@ import { AppShell, requireApprovedUser } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { Card, Badge } from '@/components/ui';
 import { PHASE_LABELS, type Phase } from '@/config/scoring';
-import { formatMadridDate, teamES, teamFlag } from '@/lib/utils';
-import Link from 'next/link';
+import { teamES, teamFlag } from '@/lib/utils';
+import { CalendarDownloadButton } from './download-button';
 
 export default async function CalendarioPage() {
   await requireApprovedUser();
@@ -16,7 +16,12 @@ export default async function CalendarioPage() {
   // Agrupar por fecha local Madrid
   const byDay = new Map<string, typeof matches>();
   for (const m of matches ?? []) {
-    const key = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(m.match_date));
+    const key = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(m.match_date));
     const arr = byDay.get(key) ?? [];
     arr!.push(m);
     byDay.set(key, arr);
@@ -31,12 +36,7 @@ export default async function CalendarioPage() {
             Todos los partidos del Mundial en hora de Madrid · 11 junio – 19 julio 2026
           </p>
         </div>
-        <Link
-          href="/api/calendar/download"
-          className="inline-flex items-center gap-2 bg-accent text-black font-semibold px-5 py-3 rounded-full hover:bg-accent/90 hover:shadow-[0_0_24px_-4px_rgba(16,185,129,0.6)]"
-        >
-          <span>📅</span> Descargar (.ics)
-        </Link>
+        <CalendarDownloadButton />
       </div>
 
       <div className="space-y-6">
