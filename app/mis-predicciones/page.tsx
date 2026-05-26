@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { MatchCard } from '@/components/match-card';
 import { Badge, Card } from '@/components/ui';
 import { PHASE_LABELS, AWARD_LABELS, SCORING_CONFIG, type Phase } from '@/config/scoring';
+import { teamES, teamFlag } from '@/lib/utils';
 import type { Match, Prediction } from '@/types';
 
 export default async function MisPrediccionesPage() {
@@ -19,6 +20,12 @@ export default async function MisPrediccionesPage() {
     .from('award_predictions')
     .select('*')
     .eq('user_id', profile.id);
+
+  const { data: semis } = await supabase
+    .from('semifinalist_predictions')
+    .select('*')
+    .eq('user_id', profile.id)
+    .order('position', { ascending: true });
 
   const allPreds = (rows ?? []) as Array<Prediction & { matches: Match }>;
   const byPhase = new Map<Phase, typeof allPreds>();
@@ -76,6 +83,38 @@ export default async function MisPrediccionesPage() {
           </div>
         </section>
       ))}
+
+      {/* Semifinalistas */}
+      <section className="mb-10">
+        <h2 className="font-display text-2xl font-bold mb-4">Semifinalistas</h2>
+        {semis && semis.length > 0 ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {semis.map((s) => (
+              <Card key={s.id} className="!p-4">
+                <div className="text-xs text-text-muted mb-1">#{s.position}</div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">{teamFlag(s.team)}</span>
+                  <span className="font-display font-semibold">{teamES(s.team)}</span>
+                </div>
+                {s.is_correct === null && <Badge>Pendiente</Badge>}
+                {s.is_correct === true && (
+                  <Badge variant="accent">+{s.points_earned} acertado</Badge>
+                )}
+                {s.is_correct === false && <Badge variant="danger">Fallado</Badge>}
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <p className="text-sm text-text-muted text-center py-3">
+              No has elegido tus semifinalistas todavía.{' '}
+              <a href="/predicciones-especiales" className="text-accent hover:underline">
+                Ir a predicciones especiales →
+              </a>
+            </p>
+          </Card>
+        )}
+      </section>
 
       {/* Premios */}
       <section>

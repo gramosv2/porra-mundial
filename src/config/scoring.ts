@@ -4,10 +4,15 @@
 // =====================================================================
 
 export const SCORING_CONFIG = {
-  // --- FASE DE GRUPOS ---
+  // --- FASE DE GRUPOS Y ELIMINATORIAS ---
+  // Sistema aditivo: si aciertas el 1X2 sumas correct_result; si además clavas
+  // el marcador exacto, sumas también exact_bonus (no es excluyente).
+  //   - Solo 1X2          → correct_result  (3)
+  //   - 1X2 + exacto      → correct_result + exact_bonus  (3 + 2 = 5)
+  //   - Fallo             → wrong  (0)
   group_stage: {
-    exact_score: 3, // Aciertas el marcador exacto (ej: 2-1 y era 2-1)
-    correct_result: 1, // Aciertas solo el ganador o el empate
+    correct_result: 3, // Pegar el 1X2 (ganador o empate)
+    exact_bonus: 2,    // Extra si además clavas el marcador
     wrong: 0,
   },
 
@@ -22,21 +27,43 @@ export const SCORING_CONFIG = {
     final: 5, // Final
   },
 
-  // --- PREMIOS INDIVIDUALES ---
-  // Se validan manualmente por el admin al finalizar el torneo
+  // --- PREMIOS INDIVIDUALES DEL TORNEO ---
+  // Se eligen ANTES de que empiecen los partidos de fase de grupos.
+  // Se resuelven manualmente por el admin al finalizar el torneo.
   awards: {
     balon_oro: 5, // Mejor jugador del torneo
     bota_oro: 4, // Máximo goleador
     guante_oro: 3, // Mejor portero
-    mejor_joven: 2, // Mejor jugador menor de 21 años
+    mejor_joven: 2, // Mejor jugador joven
     fair_play: 1, // Equipo con mejor récord disciplinario (2ª fase)
+  },
+
+  // --- SEMIFINALISTAS ---
+  // El usuario elige 4 selecciones que cree que llegarán a semifinales.
+  // Por cada acierto, +1 punto. Se cierran cuando arranca el torneo.
+  semifinalists: {
+    count: 4,
+    points_per_hit: 1,
+  },
+
+  // --- REPARTO DEL BOTE (informativo, la web no gestiona el dinero) ---
+  prize_distribution: {
+    first: 0.75,   // 75%
+    second: 0.20,  // 20%
+    third: 0.05,   // 5%
   },
 } as const;
 
 export type Phase = 'grupos' | keyof typeof SCORING_CONFIG.phase_multipliers;
 export type AwardType = keyof typeof SCORING_CONFIG.awards;
 
-// Función principal: calcula puntos de un partido
+/**
+ * Calcula los puntos de un partido para una predicción dada.
+ * Modelo aditivo:
+ *  - 1X2 acertado → correct_result
+ *  - Marcador exacto → correct_result + exact_bonus
+ * Sobre estos puntos se aplica el multiplicador de fase (1 en fase de grupos).
+ */
 export function calculateMatchPoints(
   predTeam1: number,
   predTeam2: number,
@@ -47,18 +74,15 @@ export function calculateMatchPoints(
   const base = SCORING_CONFIG.group_stage;
   const multiplier = phase === 'grupos' ? 1 : SCORING_CONFIG.phase_multipliers[phase];
 
-  if (predTeam1 === realTeam1 && predTeam2 === realTeam2) {
-    return Math.round(base.exact_score * multiplier);
-  }
-
   const predResult = Math.sign(predTeam1 - predTeam2);
   const realResult = Math.sign(realTeam1 - realTeam2);
+  if (predResult !== realResult) return base.wrong;
 
-  if (predResult === realResult) {
-    return Math.round(base.correct_result * multiplier);
+  let points = base.correct_result;
+  if (predTeam1 === realTeam1 && predTeam2 === realTeam2) {
+    points += base.exact_bonus;
   }
-
-  return base.wrong;
+  return Math.round(points * multiplier);
 }
 
 // Indica si una predicción fue marcador exacto
@@ -98,4 +122,12 @@ export const AWARD_LABELS: Record<AwardType, string> = {
   guante_oro: 'Guante de Oro',
   mejor_joven: 'Mejor Jugador Joven',
   fair_play: 'Premio Fair Play',
+};
+
+export const AWARD_DESCRIPTIONS: Record<AwardType, string> = {
+  balon_oro: 'Mejor jugador del torneo',
+  bota_oro: 'Máximo goleador',
+  guante_oro: 'Mejor portero',
+  mejor_joven: 'Mejor jugador joven',
+  fair_play: 'Equipo con mejor récord disciplinario (2ª fase)',
 };

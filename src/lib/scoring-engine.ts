@@ -75,6 +75,14 @@ export async function recalculateUserTotals(supabase: AdminClient, userId: strin
     .eq('is_correct', true);
   for (const a of awards ?? []) total += a.points_earned ?? 0;
 
+  // Sumar también los puntos de semifinalistas acertados
+  const { data: semis } = await supabase
+    .from('semifinalist_predictions')
+    .select('points_earned')
+    .eq('user_id', userId)
+    .eq('is_correct', true);
+  for (const s of semis ?? []) total += s.points_earned ?? 0;
+
   await supabase
     .from('profiles')
     .update({ total_points: total, exact_scores: exact, correct_results: correct })
@@ -114,6 +122,40 @@ export async function resolveAward(
       .update({
         is_correct: isCorrect,
         points_earned: isCorrect ? points : 0,
+      })
+      .eq('id', p.id);
+    affected.add(p.user_id);
+  }
+
+  for (const userId of affected) {
+    await recalculateUserTotals(supabase, userId);
+  }
+}
+
+/**
+ * Resuelve las predicciones de semifinalistas dadas las 4 selecciones reales.
+ * Cada acierto suma SCORING_CONFIG.semifinalists.points_per_hit puntos.
+ * Acepta nombres en cualquier orden y comparación case-insensitive.
+ */
+export async function resolveSemifinalists(
+  supabase: AdminClient,
+  realSemifinalists: string[]
+) {
+  const normalized = new Set(
+    realSemifinalists.map((t) => t.trim().toLowerCase())
+  );
+  const pointsPerHit = SCORING_CONFIG.semifinalists.points_per_hit;
+
+  const { data: preds } = await supabase.from('semifinalist_predictions').select('*');
+  const affected = new Set<string>();
+
+  for (const p of preds ?? []) {
+    const isCorrect = normalized.has(p.team.trim().toLowerCase());
+    await supabase
+      .from('semifinalist_predictions')
+      .update({
+        is_correct: isCorrect,
+        points_earned: isCorrect ? pointsPerHit : 0,
       })
       .eq('id', p.id);
     affected.add(p.user_id);

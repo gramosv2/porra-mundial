@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server';
 import { MatchCard } from '@/components/match-card';
 import { Badge, Card, Avatar } from '@/components/ui';
 import { SpainBanner } from './spain-banner';
-import { AwardsForm } from './awards-form';
 import { formatMadridDate, teamES } from '@/lib/utils';
 import Link from 'next/link';
 import type { Match, Prediction } from '@/types';
@@ -175,9 +174,54 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* Premios individuales */}
-      <section className="mb-6">
-        <AwardsForm userId={profile.id} />
+      {/* CTA: predicciones especiales + reparto del bote */}
+      <section className="mb-6 grid lg:grid-cols-2 gap-4">
+        <Link
+          href="/predicciones-especiales"
+          className="group rounded-card border border-accent/30 bg-gradient-to-br from-accent/15 to-accent/5 p-6 hover:border-accent transition-all"
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-3xl">🎯</span>
+            <h3 className="font-display text-xl font-bold">Predicciones especiales</h3>
+          </div>
+          <p className="text-sm text-text-muted">
+            Elige tus semifinalistas y los premios individuales (Balón de Oro, Bota, Guante…).
+            Se cierran al empezar el primer partido.
+          </p>
+          <div className="mt-3 text-accent text-sm font-semibold group-hover:underline">
+            Ir →
+          </div>
+        </Link>
+
+        <div className="rounded-card border border-gold/30 bg-gradient-to-br from-gold/10 to-transparent p-6">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-3xl">💶</span>
+            <h3 className="font-display text-xl font-bold">Reparto del bote</h3>
+          </div>
+          <div className="grid grid-cols-3 gap-3 mt-2">
+            <div className="text-center">
+              <div className="text-2xl">🥇</div>
+              <div className="font-display text-2xl font-bold text-gold mt-1">75%</div>
+              <div className="text-[10px] uppercase tracking-wide text-text-muted mt-1">
+                1er puesto
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl">🥈</div>
+              <div className="font-display text-2xl font-bold text-text mt-1">20%</div>
+              <div className="text-[10px] uppercase tracking-wide text-text-muted mt-1">
+                2º puesto
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl">🥉</div>
+              <div className="font-display text-2xl font-bold text-text mt-1">5%</div>
+              <div className="text-[10px] uppercase tracking-wide text-text-muted mt-1">
+                3er puesto
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </AppShell>
   );

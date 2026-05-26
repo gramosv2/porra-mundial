@@ -50,6 +50,16 @@ export interface AwardPrediction {
   points_earned: number;
 }
 
+export interface SemifinalistPrediction {
+  id: number;
+  user_id: string;
+  team: string;
+  position: number;
+  is_correct: boolean | null;
+  points_earned: number;
+  created_at: string;
+}
+
 export interface WatchEvent {
   id: number;
   match_id: number | null;

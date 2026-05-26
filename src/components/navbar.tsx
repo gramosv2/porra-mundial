@@ -15,6 +15,7 @@ interface NavbarProps {
 const LINKS = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/partidos', label: 'Partidos' },
+  { href: '/predicciones-especiales', label: 'Especiales' },
   { href: '/clasificacion', label: 'Clasificación' },
   { href: '/mis-predicciones', label: 'Mis predicciones' },
   { href: '/quedadas', label: 'Quedadas' },
