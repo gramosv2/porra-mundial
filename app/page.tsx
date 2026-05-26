@@ -24,11 +24,11 @@ export default async function HomePage() {
         </div>
 
         <h1 className="font-display text-5xl sm:text-7xl lg:text-8xl font-extrabold tracking-tight leading-[0.95] max-w-4xl">
-          La porra del{' '}
+          Porra 🇺🇸🇨🇦🇲🇽{' '}
           <span className="bg-gradient-to-br from-accent via-emerald-300 to-gold bg-clip-text text-transparent">
-            Mundial 2026
+		  FIFA World Cup 2026 🌎🏆
           </span>{' '}
-          entre amigos. 🏆
+          Win it all 💶💶
         </h1>
 
         <p className="mt-6 text-text-muted text-lg max-w-2xl leading-relaxed">
