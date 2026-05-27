@@ -83,7 +83,6 @@ export default async function HomePage() {
       </div>
 
       <footer className="relative z-10 border-t border-border mt-12 py-6 text-center text-xs text-text-muted">
-        Hecho con cariño para amigos · v1.0
       </footer>
     </main>
   );
