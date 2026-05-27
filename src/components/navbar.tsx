@@ -36,27 +36,28 @@ export function Navbar({ profile }: NavbarProps) {
 
   return (
     <nav className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-16 lg:h-16 flex items-center justify-between gap-2 py-2 lg:py-0">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-16 flex items-center justify-between gap-3 py-2">
         <Link href="/dashboard" className="flex items-center group min-w-0 py-1 mr-2">
-          {/* Desktop: una sola línea con todo el título */}
-          <span className="hidden lg:inline font-display font-bold leading-tight tracking-tight text-base group-hover:text-accent whitespace-nowrap">
-            Porra 🇺🇸🇨🇦🇲🇽 FIFA World Cup{' '}
-            <span className="text-accent">2026</span> 🌎🏆
-            <span className="text-text-muted font-semibold ml-2">
-              <span className="text-border mr-1">|</span>Win it all 💶💶
+          {/* Desktop: 3 líneas — misma proporción que mobile pero más compactas */}
+          <span className="hidden lg:flex flex-col font-display font-bold leading-[1.1] tracking-tight group-hover:text-accent">
+            <span className="text-sm whitespace-nowrap">
+              Porra 🇺🇸🇨🇦🇲🇽
+            </span>
+            <span className="text-sm whitespace-nowrap">
+              FIFA World Cup <span className="text-accent">2026</span> 🌎🏆
+            </span>
+            <span className="text-[10px] text-text-muted font-semibold whitespace-nowrap mt-0.5">
+              Win it all 💶💶
             </span>
           </span>
 
-          {/* Mobile: 4 líneas */}
+          {/* Mobile: 3 líneas */}
           <span className="lg:hidden font-display font-bold leading-[1.15] tracking-tight group-hover:text-accent flex flex-col">
             <span className="text-base sm:text-lg whitespace-nowrap">
               Porra 🇺🇸🇨🇦🇲🇽
             </span>
-            <span className="text-base sm:text-lg whitespace-nowrap text-accent">
-              FIFA World
-            </span>
             <span className="text-base sm:text-lg whitespace-nowrap">
-              Cup 2026 🌎🏆
+              FIFA World Cup <span className="text-accent">2026</span> 🌎🏆
             </span>
             <span className="text-xs sm:text-sm text-text-muted font-semibold whitespace-nowrap mt-0.5">
               Win it all 💶💶
