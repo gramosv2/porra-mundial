@@ -7,12 +7,22 @@ export interface Profile {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  bio: string | null;
   role: 'user' | 'admin';
   approved: boolean;
   total_points: number;
   exact_scores: number;
   correct_results: number;
   created_at: string;
+}
+
+export interface Newsletter {
+  id: number;
+  title: string;
+  body: string;
+  published_at: string;
+  created_by: string | null;
+  updated_at: string;
 }
 
 export interface Match {

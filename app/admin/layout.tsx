@@ -7,6 +7,7 @@ const ADMIN_LINKS = [
   { href: '/admin/partidos', label: 'Partidos', icon: '⚽' },
   { href: '/admin/eliminatorias', label: 'Eliminatorias', icon: '🏆' },
   { href: '/admin/especiales', label: 'Especiales', icon: '🥇' },
+  { href: '/admin/newsletters', label: 'Newsletter', icon: '📰' },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

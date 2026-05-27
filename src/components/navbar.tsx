@@ -19,7 +19,9 @@ const LINKS = [
   { href: '/clasificacion', label: 'Clasificación' },
   { href: '/mis-predicciones', label: 'Mis predicciones' },
   { href: '/quedadas', label: 'Quedadas' },
+  { href: '/newsletter', label: 'Newsletter' },
   { href: '/calendario', label: 'Calendario' },
+  { href: '/perfil', label: 'Mi perfil' },
 ];
 
 export function Navbar({ profile }: NavbarProps) {

@@ -3,9 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { MatchCard } from '@/components/match-card';
 import { Badge, Card, Avatar } from '@/components/ui';
 import { SpainBanner } from './spain-banner';
+import { DashboardNewsletter } from './dashboard-newsletter';
 import { formatMadridDate, teamES } from '@/lib/utils';
 import Link from 'next/link';
-import type { Match, Prediction } from '@/types';
+import type { Match, Prediction, Newsletter } from '@/types';
 
 export default async function DashboardPage() {
   const profile = await requireApprovedUser();
@@ -57,9 +58,25 @@ export default async function DashboardPage() {
     return diff > 0 && diff < 24 * 60 * 60 * 1000 && !predsByMatch.has(m.id);
   });
 
+  // Última newsletter publicada
+  const { data: latestNewsletter } = await supabase
+    .from('newsletters')
+    .select('*')
+    .order('published_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   return (
     <AppShell>
-      <SpainBanner />
+      {/* Grid: España 1/4 + Newsletter 3/4 en desktop; apilado en mobile */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+        <div className="lg:col-span-1">
+          <SpainBanner />
+        </div>
+        <div className="lg:col-span-3">
+          <DashboardNewsletter newsletter={(latestNewsletter as Newsletter | null) ?? null} />
+        </div>
+      </div>
 
       {/* Hero personal */}
       <section className="mt-6 mb-10">
