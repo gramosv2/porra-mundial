@@ -13,15 +13,15 @@ interface NavbarProps {
 }
 
 const LINKS = [
-  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/dashboard', label: 'Inicio' },
   { href: '/partidos', label: 'Partidos' },
   { href: '/predicciones-especiales', label: 'Especiales' },
-  { href: '/clasificacion', label: 'Clasificación' },
-  { href: '/mis-predicciones', label: 'Mis predicciones' },
+  { href: '/clasificacion', label: 'Ranking' },
+  { href: '/mis-predicciones', label: 'Mis preds' },
   { href: '/quedadas', label: 'Quedadas' },
-  { href: '/newsletter', label: 'Newsletter' },
+  { href: '/newsletter', label: 'News' },
   { href: '/calendario', label: 'Calendario' },
-  { href: '/perfil', label: 'Mi perfil' },
+  { href: '/perfil', label: 'Perfil' },
 ];
 
 export function Navbar({ profile }: NavbarProps) {
@@ -39,9 +39,9 @@ export function Navbar({ profile }: NavbarProps) {
   return (
     <nav className="sticky top-0 z-40 bg-background/85 backdrop-blur-xl border-b border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-16 flex items-center justify-between gap-3 py-2">
-        <Link href="/dashboard" className="flex items-center group min-w-0 py-1 mr-2">
-          {/* Desktop: 3 líneas — misma proporción que mobile pero más compactas */}
-          <span className="hidden lg:flex flex-col font-display font-bold leading-[1.1] tracking-tight group-hover:text-accent">
+        <Link href="/dashboard" className="flex items-center group min-w-0 py-1 mr-2 flex-shrink-0">
+          {/* Desktop (≥xl): 3 líneas compactas */}
+          <span className="hidden xl:flex flex-col font-display font-bold leading-[1.1] tracking-tight group-hover:text-accent">
             <span className="text-sm whitespace-nowrap">
               Porra 🇺🇸🇨🇦🇲🇽
             </span>
@@ -53,8 +53,8 @@ export function Navbar({ profile }: NavbarProps) {
             </span>
           </span>
 
-          {/* Mobile: 3 líneas */}
-          <span className="lg:hidden font-display font-bold leading-[1.15] tracking-tight group-hover:text-accent flex flex-col">
+          {/* Mobile / tablet (<xl): 3 líneas */}
+          <span className="xl:hidden font-display font-bold leading-[1.15] tracking-tight group-hover:text-accent flex flex-col">
             <span className="text-base sm:text-lg whitespace-nowrap">
               Porra 🇺🇸🇨🇦🇲🇽
             </span>
@@ -67,14 +67,14 @@ export function Navbar({ profile }: NavbarProps) {
           </span>
         </Link>
 
-        {/* Desktop nav */}
-        <div className="hidden lg:flex items-center gap-1">
+        {/* Desktop nav (≥xl) */}
+        <div className="hidden xl:flex items-center gap-0.5 flex-1 justify-center min-w-0">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
               className={cn(
-                'px-3 py-2 text-sm rounded-full font-medium',
+                'px-2.5 py-1.5 text-xs rounded-full font-medium whitespace-nowrap transition-colors',
                 pathname.startsWith(l.href)
                   ? 'text-accent bg-accent/10'
                   : 'text-text-muted hover:text-text hover:bg-surface-2'
@@ -87,7 +87,7 @@ export function Navbar({ profile }: NavbarProps) {
             <Link
               href="/admin/usuarios"
               className={cn(
-                'px-3 py-2 text-sm rounded-full font-medium',
+                'px-2.5 py-1.5 text-xs rounded-full font-medium whitespace-nowrap transition-colors',
                 pathname.startsWith('/admin')
                   ? 'text-gold bg-gold/10'
                   : 'text-text-muted hover:text-gold'
@@ -99,7 +99,7 @@ export function Navbar({ profile }: NavbarProps) {
         </div>
 
         {/* User chip */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <div className="hidden sm:flex items-center gap-2 bg-surface-2 border border-border rounded-full pl-1 pr-3 py-1">
             <Avatar name={profile.display_name} size={28} />
             <div className="flex flex-col leading-tight">
@@ -117,7 +117,7 @@ export function Navbar({ profile }: NavbarProps) {
           </button>
           <button
             onClick={() => setOpen(!open)}
-            className="lg:hidden p-2 rounded-md hover:bg-surface-2"
+            className="xl:hidden p-2 rounded-md hover:bg-surface-2"
             aria-label="Menu"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -133,7 +133,7 @@ export function Navbar({ profile }: NavbarProps) {
 
       {/* Mobile menu */}
       {open && (
-        <div className="lg:hidden border-t border-border bg-surface animate-fade-in">
+        <div className="xl:hidden border-t border-border bg-surface animate-fade-in">
           <div className="px-4 py-3 flex flex-col gap-1">
             {LINKS.map((l) => (
               <Link
