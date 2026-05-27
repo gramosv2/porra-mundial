@@ -39,6 +39,8 @@ export interface Prediction {
   pred_team2: number;
   points_earned: number;
   submitted_at: string;
+  locked: boolean;
+  locked_at: string | null;
 }
 
 export interface AwardPrediction {
@@ -48,6 +50,8 @@ export interface AwardPrediction {
   prediction: string;
   is_correct: boolean | null;
   points_earned: number;
+  locked: boolean;
+  locked_at: string | null;
 }
 
 export interface SemifinalistPrediction {
@@ -58,6 +62,8 @@ export interface SemifinalistPrediction {
   is_correct: boolean | null;
   points_earned: number;
   created_at: string;
+  locked: boolean;
+  locked_at: string | null;
 }
 
 export interface WatchEvent {

@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Badge, Card, Input, PulseDot } from './ui';
 import { formatMadridDate, teamES, teamFlag, timeUntil, cn } from '@/lib/utils';
+import { SCORING_CONFIG } from '@/config/scoring';
 import type { Match, Prediction } from '@/types';
 
 interface MatchCardProps {
@@ -21,18 +23,29 @@ interface MatchCardProps {
 }
 
 export function MatchCard({ match, userId, userPrediction, allPredictions }: MatchCardProps) {
+  const router = useRouter();
   const [p1, setP1] = useState<string>(userPrediction?.pred_team1?.toString() ?? '');
   const [p2, setP2] = useState<string>(userPrediction?.pred_team2?.toString() ?? '');
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [locking, setLocking] = useState(false);
+  const [locked, setLocked] = useState<boolean>(userPrediction?.locked ?? false);
 
   const supabase = createClient();
   const isOpen = match.status === 'open';
   const isClosed = match.status === 'closed';
   const isFinished = match.status === 'finished';
 
+  // Ventana para cerrar/abrir (≥ N horas)
+  const msToMatch = new Date(match.match_date).getTime() - Date.now();
+  const lockMs = SCORING_CONFIG.lock_hours_before_match * 60 * 60 * 1000;
+  const inLockWindow = msToMatch >= lockMs;
+  const canEdit = isOpen && !locked;
+  const canLockToggle = isOpen && inLockWindow && !!userPrediction;
+
   const save = async () => {
+    if (!canEdit) return;
     if (p1 === '' || p2 === '') return;
     const a = parseInt(p1, 10);
     const b = parseInt(p2, 10);
@@ -57,8 +70,32 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
       } else {
         setSavedAt(Date.now());
         setTimeout(() => setSavedAt(null), 2000);
+        router.refresh();
       }
     });
+  };
+
+  const toggleLock = async () => {
+    if (!canLockToggle) return;
+    if (!locked && (p1 === '' || p2 === '')) {
+      setError('Guarda primero un resultado antes de cerrar.');
+      return;
+    }
+    setLocking(true);
+    setError(null);
+    const res = await fetch('/api/predictions/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId: match.id, lock: !locked }),
+    });
+    setLocking(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? 'Error al cambiar el estado');
+      return;
+    }
+    setLocked(!locked);
+    router.refresh();
   };
 
   const userHit = userPrediction
@@ -71,8 +108,8 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
     : null;
 
   return (
-    <Card className="relative overflow-hidden">
-      <div className="flex items-center justify-between mb-3">
+    <Card className={cn('relative overflow-hidden', locked && 'ring-1 ring-accent/40')}>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           {isOpen && (
             <Badge variant="open">
@@ -81,6 +118,9 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
           )}
           {isClosed && <Badge variant="closed">Cerrado</Badge>}
           {isFinished && <Badge variant="finished">Finalizado</Badge>}
+          {locked && isOpen && (
+            <Badge variant="accent">🔒 Confirmada</Badge>
+          )}
           {match.group_name && (
             <Badge variant="default">
               Grupo {match.group_name} · J{match.matchday}
@@ -113,7 +153,11 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
                 value={p1}
                 onChange={(e) => setP1(e.target.value.replace(/\D/g, ''))}
                 onBlur={save}
-                className="w-12 text-center text-lg font-display font-bold !px-0"
+                disabled={!canEdit}
+                className={cn(
+                  'w-12 text-center text-lg font-display font-bold !px-0',
+                  !canEdit && 'opacity-70 cursor-not-allowed'
+                )}
                 maxLength={2}
               />
               <span className="text-text-muted">–</span>
@@ -123,7 +167,11 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
                 value={p2}
                 onChange={(e) => setP2(e.target.value.replace(/\D/g, ''))}
                 onBlur={save}
-                className="w-12 text-center text-lg font-display font-bold !px-0"
+                disabled={!canEdit}
+                className={cn(
+                  'w-12 text-center text-lg font-display font-bold !px-0',
+                  !canEdit && 'opacity-70 cursor-not-allowed'
+                )}
                 maxLength={2}
               />
             </>
@@ -145,13 +193,38 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
         </div>
       </div>
 
+      {/* Botón lock/unlock */}
+      {isOpen && userPrediction && (
+        <div className="mt-3 flex items-center justify-end">
+          {!inLockWindow ? (
+            <span className="text-[11px] text-text-muted italic">
+              🔒 Bloqueado (faltan menos de {SCORING_CONFIG.lock_hours_before_match}h)
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleLock}
+              disabled={locking}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                locked
+                  ? 'bg-accent/10 border-accent/40 text-accent hover:bg-accent/15'
+                  : 'bg-surface-2 border-border text-text-muted hover:text-text hover:border-accent/40'
+              )}
+            >
+              {locking ? '…' : locked ? '🔓 Reabrir' : '🔒 Confirmar'}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Feedback línea */}
       <div className="mt-3 min-h-[20px] text-xs flex items-center justify-between">
         {pending && <span className="text-text-muted">Guardando…</span>}
         {savedAt && <span className="text-accent">✓ Guardado</span>}
         {error && <span className="text-danger">{error}</span>}
 
-        {userPrediction && !isFinished && !pending && !savedAt && (
+        {userPrediction && !isFinished && !pending && !savedAt && !error && (
           <span className="text-text-muted">
             Tu predicción: <span className="text-text font-semibold">{userPrediction.pred_team1}–{userPrediction.pred_team2}</span>
           </span>

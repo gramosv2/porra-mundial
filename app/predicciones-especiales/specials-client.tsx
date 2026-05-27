@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, Badge } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { teamES, teamFlag } from '@/lib/utils';
+import { teamES, teamFlag, cn } from '@/lib/utils';
 import type { AwardType } from '@/config/scoring';
 import type { AwardPrediction, SemifinalistPrediction } from '@/types';
 
@@ -46,13 +46,14 @@ export function SpecialsClient({
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  // Estado local de awards: { balon_oro: 'Lamine Yamal', ... }
+  // ----- AWARDS -----
   const awardInitial: Partial<Record<AwardType, string>> = {};
   for (const a of initialAwards) awardInitial[a.award_type] = a.prediction;
   const [awards, setAwards] = useState<Partial<Record<AwardType, string>>>(awardInitial);
   const [busyAward, setBusyAward] = useState<AwardType | null>(null);
+  const [lockingAward, setLockingAward] = useState<AwardType | null>(null);
 
-  // Estado local de semis: array de strings, longitud semiCount
+  // ----- SEMIS -----
   const semiInitial: string[] = Array(semiCount).fill('');
   for (const s of initialSemis) {
     if (s.position >= 1 && s.position <= semiCount) {
@@ -61,6 +62,11 @@ export function SpecialsClient({
   }
   const [semis, setSemis] = useState<string[]>(semiInitial);
   const [savingSemis, setSavingSemis] = useState(false);
+  const [lockingSemis, setLockingSemis] = useState(false);
+
+  // Las semis están lockeadas si TODAS las filas tienen locked=true (es bloque)
+  const semisLocked =
+    initialSemis.length === semiCount && initialSemis.every((s) => s.locked);
 
   async function saveAward(type: AwardType) {
     if (!isOpen) return;
@@ -95,9 +101,28 @@ export function SpecialsClient({
     startTransition(() => router.refresh());
   }
 
+  async function toggleAwardLock(type: AwardType, current: boolean) {
+    setLockingAward(type);
+    const res = await fetch('/api/awards/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ awardType: type, lock: !current }),
+    });
+    setLockingAward(null);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert('Error: ' + (data.error ?? 'desconocido'));
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
   async function saveSemis() {
     if (!isOpen) return;
-    // Validar: 4 distintos, no vacíos
+    if (semisLocked) {
+      alert('Tus semifinalistas están cerrados. Reábrelos primero para editar.');
+      return;
+    }
     const filled = semis.map((s) => s.trim()).filter(Boolean);
     if (filled.length !== semiCount) {
       alert(`Debes elegir ${semiCount} selecciones.`);
@@ -118,7 +143,6 @@ export function SpecialsClient({
       return;
     }
 
-    // Estrategia simple: borrar las existentes del usuario e insertar las 4 nuevas
     const { error: delErr } = await supabase
       .from('semifinalist_predictions')
       .delete()
@@ -143,9 +167,25 @@ export function SpecialsClient({
     startTransition(() => router.refresh());
   }
 
-  const lockedNotice = !isOpen && (
+  async function toggleSemisLock() {
+    setLockingSemis(true);
+    const res = await fetch('/api/semifinalists/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lock: !semisLocked }),
+    });
+    setLockingSemis(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert('Error: ' + (data.error ?? 'desconocido'));
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
+  const deadlinePassedNotice = !isOpen && (
     <p className="text-xs text-danger">
-      🔒 Predicciones cerradas. Ya no se pueden editar.
+      🔒 Predicciones cerradas por deadline. Ya no se pueden editar.
     </p>
   );
 
@@ -153,19 +193,20 @@ export function SpecialsClient({
     <div className="space-y-10">
       {/* === SEMIFINALISTAS === */}
       <section>
-        <div className="mb-4">
-          <h2 className="font-display text-2xl font-semibold">
-            🌐 Semifinalistas
-          </h2>
-          <p className="text-text-muted text-sm mt-1">
-            Elige las {semiCount} selecciones que crees que llegarán a semifinales.{' '}
-            <span className="text-accent font-medium">
-              +{semiPointsPerHit} punto por cada acierto.
-            </span>
-          </p>
+        <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-display text-2xl font-semibold">🌐 Semifinalistas</h2>
+            <p className="text-text-muted text-sm mt-1">
+              Elige las {semiCount} selecciones que crees que llegarán a semifinales.{' '}
+              <span className="text-accent font-medium">
+                +{semiPointsPerHit} punto por cada acierto.
+              </span>
+            </p>
+          </div>
+          {semisLocked && <Badge variant="accent">🔒 Confirmadas</Badge>}
         </div>
 
-        <Card>
+        <Card className={cn(semisLocked && 'ring-1 ring-accent/40')}>
           <div className="grid sm:grid-cols-2 gap-3">
             {semis.map((value, i) => (
               <div key={i}>
@@ -179,7 +220,7 @@ export function SpecialsClient({
                     next[i] = e.target.value;
                     setSemis(next);
                   }}
-                  disabled={!isOpen}
+                  disabled={!isOpen || semisLocked}
                   className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:opacity-60"
                 >
                   <option value="">— Elige selección —</option>
@@ -198,24 +239,38 @@ export function SpecialsClient({
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-4 flex-wrap">
-            {initialSemis.length > 0 && initialSemis.every((s) => s.is_correct !== null) && (
-              <div className="flex flex-wrap gap-2">
-                {initialSemis.map((s) => (
-                  <Badge
-                    key={s.id}
-                    variant={s.is_correct ? 'accent' : 'default'}
-                  >
-                    {teamFlag(s.team)} {teamES(s.team)}{' '}
-                    {s.is_correct ? '✓' : '✗'}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            <div className="flex items-center gap-3 ml-auto">
-              {lockedNotice}
-              <Button onClick={saveSemis} disabled={!isOpen || savingSemis}>
-                {savingSemis ? 'Guardando…' : 'Guardar semifinalistas'}
+            {initialSemis.length > 0 &&
+              initialSemis.every((s) => s.is_correct !== null) && (
+                <div className="flex flex-wrap gap-2">
+                  {initialSemis.map((s) => (
+                    <Badge
+                      key={s.id}
+                      variant={s.is_correct ? 'accent' : 'default'}
+                    >
+                      {teamFlag(s.team)} {teamES(s.team)}{' '}
+                      {s.is_correct ? '✓' : '✗'}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            <div className="flex items-center gap-2 ml-auto flex-wrap">
+              {deadlinePassedNotice}
+              <Button
+                onClick={saveSemis}
+                disabled={!isOpen || semisLocked || savingSemis}
+                variant="secondary"
+              >
+                {savingSemis ? 'Guardando…' : 'Guardar selección'}
               </Button>
+              {isOpen && initialSemis.length === semiCount && (
+                <Button
+                  onClick={toggleSemisLock}
+                  disabled={lockingSemis}
+                  variant={semisLocked ? 'ghost' : 'primary'}
+                >
+                  {lockingSemis ? '…' : semisLocked ? '🔓 Reabrir' : '🔒 Confirmar'}
+                </Button>
+              )}
             </div>
           </div>
         </Card>
@@ -226,7 +281,7 @@ export function SpecialsClient({
         <div className="mb-4">
           <h2 className="font-display text-2xl font-semibold">🥇 Premios individuales</h2>
           <p className="text-text-muted text-sm mt-1">
-            5 premios del torneo. Los puntos se otorgan cuando el admin resuelve cada premio al final.
+            5 premios del torneo. Confirma cada predicción para asegurarla. Puedes reabrirla hasta el deadline.
           </p>
         </div>
 
@@ -235,14 +290,26 @@ export function SpecialsClient({
             const existing = initialAwards.find((a) => a.award_type === type);
             const resolved = existing?.is_correct !== null && existing?.is_correct !== undefined;
             const won = existing?.is_correct === true;
+            const locked = existing?.locked === true;
+
+            const canEdit = isOpen && !resolved && !locked;
+            const canToggleLock = isOpen && !resolved && !!existing;
 
             return (
-              <Card key={type}>
+              <Card
+                key={type}
+                className={cn(locked && !resolved && 'ring-1 ring-accent/40')}
+              >
                 <div className="flex items-start justify-between gap-4 flex-wrap mb-3">
                   <div className="flex items-start gap-3">
                     <span className="text-2xl">{AWARD_ICON[type]}</span>
                     <div>
-                      <div className="font-display font-semibold text-lg">{awardLabels[type]}</div>
+                      <div className="font-display font-semibold text-lg flex items-center gap-2">
+                        {awardLabels[type]}
+                        {locked && !resolved && (
+                          <Badge variant="accent">🔒 Confirmada</Badge>
+                        )}
+                      </div>
                       <div className="text-xs text-text-muted">
                         {awardDescriptions[type]} · +{awardPoints[type]} puntos
                       </div>
@@ -259,29 +326,48 @@ export function SpecialsClient({
                   <input
                     type="text"
                     value={awards[type] ?? ''}
-                    onChange={(e) => setAwards((s) => ({ ...s, [type]: e.target.value }))}
-                    placeholder={
-                      type === 'fair_play'
-                        ? 'Nombre del equipo…'
-                        : 'Nombre del jugador…'
+                    onChange={(e) =>
+                      setAwards((s) => ({ ...s, [type]: e.target.value }))
                     }
-                    disabled={!isOpen || resolved}
+                    placeholder={
+                      type === 'fair_play' ? 'Nombre del equipo…' : 'Nombre del jugador…'
+                    }
+                    disabled={!canEdit}
                     className="flex-1 min-w-[180px] bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm focus:border-accent focus:outline-none disabled:opacity-60"
                   />
                   <Button
                     size="sm"
+                    variant="secondary"
                     onClick={() => saveAward(type)}
-                    disabled={!isOpen || resolved || busyAward === type}
+                    disabled={!canEdit || busyAward === type}
                   >
-                    {busyAward === type ? 'Guardando…' : existing ? 'Actualizar' : 'Guardar'}
+                    {busyAward === type
+                      ? 'Guardando…'
+                      : existing
+                        ? 'Actualizar'
+                        : 'Guardar'}
                   </Button>
+                  {canToggleLock && (
+                    <Button
+                      size="sm"
+                      variant={locked ? 'ghost' : 'primary'}
+                      onClick={() => toggleAwardLock(type, locked)}
+                      disabled={lockingAward === type}
+                    >
+                      {lockingAward === type
+                        ? '…'
+                        : locked
+                          ? '🔓 Reabrir'
+                          : '🔒 Confirmar'}
+                    </Button>
+                  )}
                 </div>
               </Card>
             );
           })}
         </div>
 
-        {!isOpen && <div className="mt-4">{lockedNotice}</div>}
+        {!isOpen && <div className="mt-4">{deadlinePassedNotice}</div>}
       </section>
     </div>
   );

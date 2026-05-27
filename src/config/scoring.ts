@@ -52,6 +52,12 @@ export const SCORING_CONFIG = {
     second: 0.20,  // 20%
     third: 0.05,   // 5%
   },
+
+  // --- VENTANA DE CIERRE/REAPERTURA DE PREDICCIONES ---
+  // Un usuario puede cerrar y reabrir su predicción mientras falten al menos
+  // estas horas para el partido. Pasada esa ventana, queda bloqueada en su
+  // último estado.
+  lock_hours_before_match: 2,
 } as const;
 
 export type Phase = 'grupos' | keyof typeof SCORING_CONFIG.phase_multipliers;
