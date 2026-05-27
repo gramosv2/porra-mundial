@@ -74,6 +74,7 @@ export interface WatchEvent {
   location: string;
   location_url: string | null;
   notes: string | null;
+  attendee_limit: number | null;
   created_by: string;
   created_at: string;
 }
