@@ -22,10 +22,21 @@ export default async function AdminMatchesPage() {
     counts[p.match_id] = (counts[p.match_id] ?? 0) + 1;
   }
 
+  // Rondas abiertas a predicción
+  const { data: setting } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'open_rounds')
+    .maybeSingle();
+  const openRounds: string[] = Array.isArray(setting?.value)
+    ? (setting!.value as string[])
+    : ['grupos'];
+
   return (
     <MatchesAdminClient
       matches={(matches ?? []) as Match[]}
       predictionCounts={counts}
+      openRounds={openRounds}
     />
   );
 }

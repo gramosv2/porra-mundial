@@ -4,6 +4,7 @@ import { MatchCard } from '@/components/match-card';
 import { Badge, Card } from '@/components/ui';
 import { PHASE_LABELS, AWARD_LABELS, SCORING_CONFIG, type Phase } from '@/config/scoring';
 import { teamES, teamFlag } from '@/lib/utils';
+import Link from 'next/link';
 import type { Match, Prediction } from '@/types';
 
 export default async function MisPrediccionesPage() {
@@ -42,9 +43,17 @@ export default async function MisPrediccionesPage() {
 
   return (
     <AppShell>
-      <div className="mb-8">
-        <h1 className="font-display text-4xl font-bold">Mis predicciones</h1>
-        <p className="text-text-muted text-sm mt-1">{allPreds.length} predicciones realizadas</p>
+      <div className="mb-8 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="font-display text-4xl font-bold">Mis predicciones</h1>
+          <p className="text-text-muted text-sm mt-1">{allPreds.length} predicciones realizadas</p>
+        </div>
+        <Link
+          href="/partidos?pendientes=1"
+          className="inline-flex items-center gap-2 bg-accent text-black font-semibold px-5 py-3 rounded-full text-sm hover:bg-accent/90 hover:shadow-[0_0_24px_-4px_rgba(16,185,129,0.6)] transition-all"
+        >
+          📋 Predecir partidos pendientes →
+        </Link>
       </div>
 
       {/* Stats */}

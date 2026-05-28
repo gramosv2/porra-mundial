@@ -20,9 +20,17 @@ interface MatchCardProps {
     pred_team2: number;
     points_earned: number;
   }>;
+  /** Si la ronda (fase) está abierta a predicciones. Por defecto true. */
+  roundOpen?: boolean;
 }
 
-export function MatchCard({ match, userId, userPrediction, allPredictions }: MatchCardProps) {
+export function MatchCard({
+  match,
+  userId,
+  userPrediction,
+  allPredictions,
+  roundOpen = true,
+}: MatchCardProps) {
   const router = useRouter();
   const [p1, setP1] = useState<string>(userPrediction?.pred_team1?.toString() ?? '');
   const [p2, setP2] = useState<string>(userPrediction?.pred_team2?.toString() ?? '');
@@ -41,8 +49,9 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
   const msToMatch = new Date(match.match_date).getTime() - Date.now();
   const lockMs = SCORING_CONFIG.lock_hours_before_match * 60 * 60 * 1000;
   const inLockWindow = msToMatch >= lockMs;
-  const canEdit = isOpen && !locked;
-  const canLockToggle = isOpen && inLockWindow && !!userPrediction;
+  // Solo se puede editar si: partido abierto + ronda abierta + no confirmada
+  const canEdit = isOpen && roundOpen && !locked;
+  const canLockToggle = isOpen && roundOpen && inLockWindow && !!userPrediction;
 
   const save = async () => {
     if (!canEdit) return;
@@ -111,14 +120,17 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
     <Card className={cn('relative overflow-hidden', locked && 'ring-1 ring-accent/40')}>
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          {isOpen && (
+          {isOpen && roundOpen && (
             <Badge variant="open">
               <PulseDot /> Abierto
             </Badge>
           )}
+          {isOpen && !roundOpen && (
+            <Badge variant="closed">🔒 Ronda cerrada</Badge>
+          )}
           {isClosed && <Badge variant="closed">Cerrado</Badge>}
           {isFinished && <Badge variant="finished">Finalizado</Badge>}
-          {locked && isOpen && (
+          {locked && isOpen && roundOpen && (
             <Badge variant="accent">🔒 Confirmada</Badge>
           )}
           {match.group_name && (
@@ -193,8 +205,15 @@ export function MatchCard({ match, userId, userPrediction, allPredictions }: Mat
         </div>
       </div>
 
+      {/* Aviso ronda cerrada (cuando el partido está open pero la ronda no) */}
+      {isOpen && !roundOpen && (
+        <div className="mt-3 text-[11px] text-text-muted italic text-center">
+          🔒 Predicciones de esta ronda aún no disponibles
+        </div>
+      )}
+
       {/* Botón lock/unlock */}
-      {isOpen && userPrediction && (
+      {isOpen && roundOpen && userPrediction && (
         <div className="mt-3 flex items-center justify-end">
           {!inLockWindow ? (
             <span className="text-[11px] text-text-muted italic">

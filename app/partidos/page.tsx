@@ -6,7 +6,7 @@ import type { Match, Prediction } from '@/types';
 export default async function PartidosPage({
   searchParams,
 }: {
-  searchParams: { phase?: string; group?: string };
+  searchParams: { phase?: string; group?: string; pendientes?: string };
 }) {
   const profile = await requireApprovedUser();
   const supabase = createClient();
@@ -20,6 +20,16 @@ export default async function PartidosPage({
     .from('predictions')
     .select('*')
     .eq('user_id', profile.id);
+
+  // Rondas abiertas a predicción
+  const { data: setting } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'open_rounds')
+    .maybeSingle();
+  const openRounds: string[] = Array.isArray(setting?.value)
+    ? (setting!.value as string[])
+    : ['grupos'];
 
   // Predicciones de todos los partidos FINISHED (RLS lo filtra)
   const finishedIds = (matches ?? []).filter((m) => m.status === 'finished').map((m) => m.id);
@@ -61,8 +71,10 @@ export default async function PartidosPage({
         userId={profile.id}
         predsByMatchEntries={Array.from(predsByMatch.entries())}
         othersByMatchEntries={Array.from(othersByMatch.entries())}
+        openRounds={openRounds}
         initialPhase={searchParams.phase}
         initialGroup={searchParams.group}
+        initialPendientes={searchParams.pendientes === '1'}
       />
     </AppShell>
   );

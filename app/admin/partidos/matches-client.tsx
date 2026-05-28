@@ -22,9 +22,10 @@ const PHASES: Array<{ id: Match['phase']; label: string }> = [
 interface Props {
   matches: Match[];
   predictionCounts: Record<number, number>;
+  openRounds: string[];
 }
 
-export function MatchesAdminClient({ matches, predictionCounts }: Props) {
+export function MatchesAdminClient({ matches, predictionCounts, openRounds }: Props) {
   const supabase = createClient();
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -32,11 +33,33 @@ export function MatchesAdminClient({ matches, predictionCounts }: Props) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [rounds, setRounds] = useState<string[]>(openRounds);
+  const [togglingRound, setTogglingRound] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => matches.filter((m) => m.phase === phase),
     [matches, phase]
   );
+
+  const currentRoundOpen = rounds.includes(phase);
+
+  async function toggleRound(targetPhase: string, open: boolean) {
+    setTogglingRound(targetPhase);
+    const res = await fetch('/api/admin/toggle-round', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase: targetPhase, open }),
+    });
+    setTogglingRound(null);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert('Error: ' + (data.error ?? 'desconocido'));
+      return;
+    }
+    const data = await res.json();
+    setRounds(data.open_rounds ?? []);
+    startTransition(() => router.refresh());
+  }
 
   async function setStatus(matchId: number, status: MatchStatus) {
     setBusyId(matchId);
@@ -142,21 +165,74 @@ export function MatchesAdminClient({ matches, predictionCounts }: Props) {
       <div className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2">
         {PHASES.map((p) => {
           const active = phase === p.id;
+          const isOpen = rounds.includes(p.id);
           return (
             <button
               key={p.id}
               onClick={() => setPhase(p.id)}
               className={
-                'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap border ' +
+                'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap border flex items-center gap-1.5 ' +
                 (active
                   ? 'bg-accent text-black border-accent'
                   : 'bg-surface text-text-muted border-border hover:text-text hover:border-border')
               }
             >
+              <span
+                className={
+                  'w-1.5 h-1.5 rounded-full ' +
+                  (isOpen
+                    ? active
+                      ? 'bg-black'
+                      : 'bg-accent'
+                    : active
+                      ? 'bg-black/40'
+                      : 'bg-text-muted/40')
+                }
+                title={isOpen ? 'Predicciones abiertas' : 'Predicciones cerradas'}
+              />
               {p.label}
             </button>
           );
         })}
+      </div>
+
+      {/* Control de apertura de la ronda actual */}
+      <div
+        className={
+          'rounded-card border px-4 py-3 flex items-center justify-between gap-3 flex-wrap ' +
+          (currentRoundOpen
+            ? 'border-accent/30 bg-accent/5'
+            : 'border-border bg-surface')
+        }
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-lg">{currentRoundOpen ? '🔓' : '🔒'}</span>
+          <div>
+            <div className="font-medium">
+              Predicciones de {PHASES.find((p) => p.id === phase)?.label}:{' '}
+              <span className={currentRoundOpen ? 'text-accent' : 'text-text-muted'}>
+                {currentRoundOpen ? 'ABIERTAS' : 'CERRADAS'}
+              </span>
+            </div>
+            <div className="text-xs text-text-muted">
+              {currentRoundOpen
+                ? 'Los usuarios pueden hacer y editar sus predicciones de esta ronda.'
+                : 'Los usuarios ven los partidos pero no pueden predecir esta ronda.'}
+            </div>
+          </div>
+        </div>
+        <Button
+          onClick={() => toggleRound(phase, !currentRoundOpen)}
+          disabled={togglingRound === phase}
+          variant={currentRoundOpen ? 'danger' : 'primary'}
+          size="sm"
+        >
+          {togglingRound === phase
+            ? '…'
+            : currentRoundOpen
+              ? '🔒 Cerrar ronda'
+              : '🔓 Abrir ronda'}
+        </Button>
       </div>
 
       {/* Match list */}
