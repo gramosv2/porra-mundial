@@ -5,6 +5,7 @@ import { Navbar } from '@/components/navbar';
 const ADMIN_LINKS = [
   { href: '/admin/usuarios', label: 'Usuarios', icon: '👥' },
   { href: '/admin/partidos', label: 'Partidos', icon: '⚽' },
+  { href: '/admin/predicciones', label: 'Predicciones', icon: '🔮' },
   { href: '/admin/eliminatorias', label: 'Eliminatorias', icon: '🏆' },
   { href: '/admin/especiales', label: 'Especiales', icon: '🥇' },
   { href: '/admin/newsletters', label: 'Newsletter', icon: '📰' },
