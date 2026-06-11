@@ -41,9 +41,12 @@ export function MatchCard({
   const [locked, setLocked] = useState<boolean>(userPrediction?.locked ?? false);
 
   const supabase = createClient();
-  const isOpen = match.status === 'open';
-  const isClosed = match.status === 'closed';
+  // Un partido se considera cerrado para predecir si su hora ya llegó,
+  // aunque el cron todavía no haya actualizado su status en la BD.
+  const kickoffPassed = new Date(match.match_date).getTime() <= Date.now();
   const isFinished = match.status === 'finished';
+  const isOpen = match.status === 'open' && !kickoffPassed;
+  const isClosed = match.status === 'closed' || (match.status === 'open' && kickoffPassed);
 
   // Ventana para cerrar/abrir (≥ N horas)
   const msToMatch = new Date(match.match_date).getTime() - Date.now();
