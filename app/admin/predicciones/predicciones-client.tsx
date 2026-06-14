@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Avatar, Badge, Card, Input } from '@/components/ui';
 import { PHASE_LABELS, type Phase } from '@/config/scoring';
 import { formatMadridDate, teamES, teamFlag, cn } from '@/lib/utils';
@@ -13,8 +14,6 @@ interface PredRow {
   pred_team1: number;
   pred_team2: number;
   points_earned: number;
-  locked: boolean;
-  submitted_at: string;
 }
 
 interface ProfileLite {
@@ -31,33 +30,15 @@ interface Props {
 }
 
 const PHASES: Array<Phase | 'todas'> = [
-  'todas',
-  'grupos',
-  'r32',
-  'r16',
-  'cuartos',
-  'semis',
-  'tercero',
-  'final',
+  'todas', 'grupos', 'r32', 'r16', 'cuartos', 'semis', 'tercero', 'final',
 ];
 
-export function PrediccionesAdminClient({
-  matches,
-  predsByMatchEntries,
-  profiles,
-}: Props) {
+export function EditPrediccionesClient({ matches, predsByMatchEntries, profiles }: Props) {
   const [phase, setPhase] = useState<Phase | 'todas'>('todas');
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const predsByMatch = useMemo(
-    () => new Map(predsByMatchEntries),
-    [predsByMatchEntries]
-  );
-  const profileById = useMemo(
-    () => new Map(profiles.map((p) => [p.id, p])),
-    [profiles]
-  );
+  const predsByMatch = useMemo(() => new Map(predsByMatchEntries), [predsByMatchEntries]);
 
   const filtered = useMemo(() => {
     return matches.filter((m) => {
@@ -74,14 +55,14 @@ export function PrediccionesAdminClient({
   return (
     <div className="space-y-4 animate-fade-in">
       <div>
-        <h2 className="font-display text-2xl font-bold">🔮 Predicciones por partido</h2>
+        <h2 className="font-display text-2xl font-bold">✏️ Editar predicciones</h2>
         <p className="text-sm text-text-muted">
-          Todos los partidos ordenados por fecha. Haz clic en uno para ver qué ha
-          predicho cada participante (visible para ti aunque el partido no haya terminado).
+          Todos los partidos por fecha. Abre uno para editar las predicciones de
+          cada participante o añadir las que falten (p.ej. alguien que se unió tarde).
+          Si el partido ya tiene resultado, los puntos se recalculan solos.
         </p>
       </div>
 
-      {/* Filtros */}
       <div className="flex flex-col sm:flex-row gap-3">
         <Input
           placeholder="Buscar por equipo o sede…"
@@ -108,11 +89,9 @@ export function PrediccionesAdminClient({
       </div>
 
       <div className="text-xs text-text-muted">
-        {filtered.length} {filtered.length === 1 ? 'partido' : 'partidos'} ·{' '}
-        {profiles.length} participantes
+        {filtered.length} {filtered.length === 1 ? 'partido' : 'partidos'} · {profiles.length} participantes
       </div>
 
-      {/* Lista de partidos */}
       <div className="space-y-2">
         {filtered.map((m) => {
           const preds = predsByMatch.get(m.id) ?? [];
@@ -121,7 +100,6 @@ export function PrediccionesAdminClient({
 
           return (
             <Card key={m.id} className="!p-0 overflow-hidden">
-              {/* Fila resumen (clicable) */}
               <button
                 type="button"
                 onClick={() => setExpandedId(expanded ? null : m.id)}
@@ -131,7 +109,6 @@ export function PrediccionesAdminClient({
                   <div className="font-mono text-xs text-text-muted w-32 flex-shrink-0">
                     {formatMadridDate(m.match_date)}
                   </div>
-
                   <div className="flex-1 min-w-[200px] flex items-center gap-2">
                     <span className="text-lg">{teamFlag(m.team1)}</span>
                     <span className="font-semibold text-sm">{teamES(m.team1)}</span>
@@ -145,38 +122,26 @@ export function PrediccionesAdminClient({
                     <span className="text-lg">{teamFlag(m.team2)}</span>
                     <span className="font-semibold text-sm">{teamES(m.team2)}</span>
                   </div>
-
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <Badge variant="default">
                       {m.phase === 'grupos' && m.group_name
                         ? `G${m.group_name} · J${m.matchday}`
                         : PHASE_LABELS[m.phase as Phase]}
                     </Badge>
-                    {m.status === 'open' && <Badge variant="open">Abierto</Badge>}
-                    {m.status === 'closed' && <Badge variant="closed">Cerrado</Badge>}
                     {isFinished && <Badge variant="finished">Finalizado</Badge>}
                     <Badge variant={preds.length === profiles.length ? 'accent' : 'gold'}>
-                      {preds.length}/{profiles.length} predicciones
+                      {preds.length}/{profiles.length}
                     </Badge>
-                    <span
-                      className={cn(
-                        'text-text-muted text-xs transition-transform',
-                        expanded && 'rotate-180'
-                      )}
-                    >
-                      ▾
-                    </span>
+                    <span className={cn('text-text-muted text-xs transition-transform', expanded && 'rotate-180')}>▾</span>
                   </div>
                 </div>
               </button>
 
-              {/* Detalle expandido */}
               {expanded && (
-                <MatchPredictionsDetail
+                <MatchEditor
                   match={m}
                   preds={preds}
                   profiles={profiles}
-                  profileById={profileById}
                 />
               )}
             </Card>
@@ -195,143 +160,173 @@ export function PrediccionesAdminClient({
   );
 }
 
-function MatchPredictionsDetail({
+function MatchEditor({
   match,
   preds,
   profiles,
-  profileById,
 }: {
   match: Match;
   preds: PredRow[];
   profiles: ProfileLite[];
-  profileById: Map<string, ProfileLite>;
 }) {
-  const isFinished = match.status === 'finished';
+  const predByUser = new Map(preds.map((p) => [p.user_id, p]));
 
-  // Ordenar: si finalizado → por puntos desc; si no → por nombre
-  const sorted = [...preds].sort((a, b) => {
-    if (isFinished && b.points_earned !== a.points_earned) {
-      return b.points_earned - a.points_earned;
+  return (
+    <div className="border-t border-border px-4 py-4 bg-background/40 space-y-1.5">
+      {profiles.map((prof) => (
+        <PlayerRow
+          key={prof.id}
+          match={match}
+          profile={prof}
+          existing={predByUser.get(prof.id) ?? null}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PlayerRow({
+  match,
+  profile,
+  existing,
+}: {
+  match: Match;
+  profile: ProfileLite;
+  existing: PredRow | null;
+}) {
+  const router = useRouter();
+  const [p1, setP1] = useState<string>(existing ? String(existing.pred_team1) : '');
+  const [p2, setP2] = useState<string>(existing ? String(existing.pred_team2) : '');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const dirty =
+    (existing ? String(existing.pred_team1) : '') !== p1 ||
+    (existing ? String(existing.pred_team2) : '') !== p2;
+
+  async function save() {
+    if (p1 === '' || p2 === '') {
+      setMsg('Pon ambos goles');
+      return;
     }
-    const na = profileById.get(a.user_id)?.display_name ?? '';
-    const nb = profileById.get(b.user_id)?.display_name ?? '';
-    return na.localeCompare(nb);
-  });
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch('/api/admin/edit-prediction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        matchId: match.id,
+        userId: profile.id,
+        pred1: Number(p1),
+        pred2: Number(p2),
+      }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg(data.error ?? 'Error');
+      return;
+    }
+    setMsg(data.warning ? '⚠ ' + data.warning : '✓ Guardado');
+    setTimeout(() => setMsg(null), 2500);
+    router.refresh();
+  }
 
-  // Participantes sin predicción
-  const predictedIds = new Set(preds.map((p) => p.user_id));
-  const missing = profiles.filter((p) => !predictedIds.has(p.id));
-
-  function hitType(p: PredRow): 'exact' | 'result' | 'miss' | null {
-    if (!isFinished || match.result_team1 == null || match.result_team2 == null) return null;
-    if (p.pred_team1 === match.result_team1 && p.pred_team2 === match.result_team2) return 'exact';
-    if (
-      Math.sign(p.pred_team1 - p.pred_team2) ===
-      Math.sign(match.result_team1 - match.result_team2)
-    )
-      return 'result';
-    return 'miss';
+  async function remove() {
+    if (!existing) return;
+    if (!confirm(`¿Borrar la predicción de ${profile.display_name}?`)) return;
+    setBusy(true);
+    setMsg(null);
+    const res = await fetch('/api/admin/edit-prediction', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId: match.id, userId: profile.id, delete: true }),
+    });
+    setBusy(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg(data.error ?? 'Error');
+      return;
+    }
+    setP1('');
+    setP2('');
+    setMsg('✓ Borrada');
+    setTimeout(() => setMsg(null), 2500);
+    router.refresh();
   }
 
   return (
-    <div className="border-t border-border px-4 py-4 bg-background/40">
-      {sorted.length === 0 ? (
-        <p className="text-sm text-text-muted italic text-center py-3">
-          Nadie ha hecho predicción para este partido todavía.
-        </p>
-      ) : (
-        <div className="space-y-1.5">
-          {sorted.map((p) => {
-            const prof = profileById.get(p.user_id);
-            const hit = hitType(p);
-            return (
-              <div
-                key={p.id}
-                className={cn(
-                  'flex items-center justify-between gap-3 rounded-lg px-3 py-2 border',
-                  hit === 'exact'
-                    ? 'border-accent/40 bg-accent/10'
-                    : hit === 'result'
-                      ? 'border-gold/40 bg-gold/10'
-                      : 'border-border bg-surface-2/50'
-                )}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  {prof?.avatar_url ? (
-                    <img
-                      src={prof.avatar_url}
-                      alt=""
-                      className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <Avatar name={prof?.display_name ?? '?'} size={28} />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {prof?.display_name ?? 'Desconocido'}
-                    </div>
-                    <div className="text-[10px] text-text-muted truncate">
-                      @{prof?.username ?? '?'} ·{' '}
-                      {new Intl.DateTimeFormat('es-ES', {
-                        timeZone: 'Europe/Madrid',
-                        day: '2-digit',
-                        month: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }).format(new Date(p.submitted_at))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {p.locked && (
-                    <span className="text-[10px] text-accent" title="Predicción confirmada">
-                      🔒
-                    </span>
-                  )}
-                  <span className="font-display font-bold text-base tabular-nums">
-                    {p.pred_team1}–{p.pred_team2}
-                  </span>
-                  {isFinished && (
-                    <span
-                      className={cn(
-                        'text-xs font-bold w-12 text-right',
-                        hit === 'exact'
-                          ? 'text-accent'
-                          : hit === 'result'
-                            ? 'text-gold'
-                            : 'text-text-muted'
-                      )}
-                    >
-                      +{p.points_earned}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+    <div
+      className={cn(
+        'flex items-center gap-3 rounded-lg px-3 py-2 border',
+        existing ? 'border-border bg-surface-2/40' : 'border-dashed border-border/60 bg-transparent'
       )}
-
-      {/* Quién falta por predecir */}
-      {missing.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-border">
-          <div className="text-[10px] uppercase tracking-widest text-text-muted mb-2">
-            Sin predicción ({missing.length})
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {missing.map((p) => (
-              <span
-                key={p.id}
-                className="inline-flex items-center gap-1.5 text-xs text-text-muted bg-surface-2 border border-border rounded-full px-2.5 py-1"
-              >
-                <Avatar name={p.display_name} size={16} />
-                {p.display_name}
-              </span>
-            ))}
+    >
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        {profile.avatar_url ? (
+          <img src={profile.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <Avatar name={profile.display_name} size={28} />
+        )}
+        <div className="min-w-0">
+          <div className="text-sm font-medium truncate">{profile.display_name}</div>
+          <div className="text-[10px] text-text-muted truncate">
+            @{profile.username}
+            {!existing && ' · sin predicción'}
+            {existing && match.status === 'finished' && ` · +${existing.points_earned} pts`}
           </div>
         </div>
-      )}
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <Input
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={p1}
+          onChange={(e) => setP1(e.target.value.replace(/\D/g, ''))}
+          className="w-11 text-center text-base font-display font-bold !px-0"
+          maxLength={2}
+          placeholder="–"
+        />
+        <span className="text-text-muted">–</span>
+        <Input
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={p2}
+          onChange={(e) => setP2(e.target.value.replace(/\D/g, ''))}
+          className="w-11 text-center text-base font-display font-bold !px-0"
+          maxLength={2}
+          placeholder="–"
+        />
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-shrink-0 w-[150px] justify-end">
+        {msg && <span className="text-[10px] text-text-muted truncate">{msg}</span>}
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy || !dirty}
+          className={cn(
+            'px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors',
+            dirty && !busy
+              ? 'bg-accent text-black border-accent hover:bg-accent/90'
+              : 'bg-surface border-border text-text-muted cursor-not-allowed'
+          )}
+        >
+          {busy ? '…' : existing ? 'Guardar' : 'Añadir'}
+        </button>
+        {existing && (
+          <button
+            type="button"
+            onClick={remove}
+            disabled={busy}
+            className="px-2 py-1.5 rounded-full text-xs border border-border text-danger hover:bg-danger/10"
+            title="Borrar predicción"
+          >
+            🗑
+          </button>
+        )}
+      </div>
     </div>
   );
 }

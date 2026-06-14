@@ -1,32 +1,29 @@
 import { requireAdmin } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/server';
-import { PrediccionesAdminClient } from './predicciones-client';
+import { EditPrediccionesClient } from './predicciones-client';
 import type { Match } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Vista admin: todos los partidos ordenados por fecha. Al hacer clic en uno
- * se despliegan las predicciones de TODOS los participantes (incluso si el
- * partido no ha terminado, por eso usamos el admin client: la RLS normal
- * oculta las predicciones ajenas hasta que el partido esté 'finished').
+ * Editor admin de predicciones: todos los partidos por fecha. Al expandir uno
+ * se ven (y editan) las predicciones de cada participante, y se pueden añadir
+ * predicciones para los que no la tienen (p.ej. alguien que se unió tarde).
+ * Usa el admin client para ver/escribir todo saltándose la RLS.
  */
-export default async function AdminPrediccionesPage() {
+export default async function AdminEditarPrediccionesPage() {
   await requireAdmin();
   const admin = createAdminClient();
 
-  // 1) Todos los partidos ordenados por fecha
   const { data: matches } = await admin
     .from('matches')
     .select('*')
     .order('match_date', { ascending: true });
 
-  // 2) Todas las predicciones (admin client => sin restricción RLS)
   const { data: preds } = await admin
     .from('predictions')
-    .select('id, user_id, match_id, pred_team1, pred_team2, points_earned, locked, submitted_at');
+    .select('id, user_id, match_id, pred_team1, pred_team2, points_earned');
 
-  // 3) Perfiles aprobados (para nombres y para saber quién NO ha predicho)
   const { data: profiles } = await admin
     .from('profiles')
     .select('id, username, display_name, avatar_url')
@@ -40,11 +37,8 @@ export default async function AdminPrediccionesPage() {
     pred_team1: number;
     pred_team2: number;
     points_earned: number;
-    locked: boolean;
-    submitted_at: string;
   };
 
-  // Agrupar predicciones por partido (serializable como entries)
   const byMatch = new Map<number, PredRow[]>();
   for (const p of (preds ?? []) as PredRow[]) {
     const arr = byMatch.get(p.match_id) ?? [];
@@ -53,7 +47,7 @@ export default async function AdminPrediccionesPage() {
   }
 
   return (
-    <PrediccionesAdminClient
+    <EditPrediccionesClient
       matches={(matches ?? []) as Match[]}
       predsByMatchEntries={Array.from(byMatch.entries())}
       profiles={
