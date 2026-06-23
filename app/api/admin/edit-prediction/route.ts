@@ -7,17 +7,24 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/admin/edit-prediction
  *
- * Permite al ADMIN crear, editar o borrar la predicción de cualquier
- * participante para un partido concreto, incluso si el partido ya empezó
- * o terminó. Usa el service role para saltarse la RLS de tiempo/estado
- * que aplica a los usuarios normales.
+ * ACCESO "ROOT" DEL ADMIN: permite crear, editar o borrar la predicción de
+ * CUALQUIER participante para CUALQUIER partido, sin importar:
+ *   - si el partido ya empezó (match_date pasado)
+ *   - el status del partido (open / closed / finished)
+ *   - si el perfil del usuario está aprobado o no
+ *   - si la predicción estaba "locked" (confirmada) por el propio usuario
+ *
+ * Usa el service role (createAdminClient), que ignora la RLS por completo.
+ * Esta ruta NO debe añadir ninguna comprobación de tiempo/estado/lock: es
+ * intencionadamente la vía de "corrección manual" para el admin por encima
+ * de cualquier regla que apliquemos a los usuarios normales.
  *
  * Body:
- *   { matchId, userId, pred1, pred2 }  → crea/edita
- *   { matchId, userId, delete: true }  → borra
+ *   { matchId, userId, pred1, pred2 }  → crea/edita (sin restricciones)
+ *   { matchId, userId, delete: true }  → borra (sin restricciones)
  */
 export async function POST(req: NextRequest) {
-  // 1) Verificar que quien llama es admin aprobado
+  // Única comprobación que SÍ se mantiene: que quien llama sea admin.
   const supabase = createClient();
   const {
     data: { user },
@@ -44,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // 2) Comprobar que el partido existe
+  // Solo comprobamos que el partido EXISTE. Da igual su status o su fecha.
   const { data: match, error: matchErr } = await admin
     .from('matches')
     .select('id, result_team1, result_team2')
@@ -54,7 +61,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Partido no encontrado' }, { status: 404 });
   }
 
-  // 3) Borrado
+  // ---- BORRADO (sin restricciones de locked/status/fecha) ----
   if (isDelete) {
     const { error, count } = await admin
       .from('predictions')
@@ -80,7 +87,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, deleted: true });
   }
 
-  // 4) Crear o editar
+  // ---- CREAR / EDITAR (sin restricciones de locked/status/fecha/approved) ----
   const pred1 = Number(body.pred1);
   const pred2 = Number(body.pred2);
   if (
@@ -90,18 +97,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Marcador inválido' }, { status: 400 });
   }
 
+  // Solo comprobamos que el perfil EXISTE (no exigimos approved=true: el
+  // admin puede querer meter la predicción de alguien que aún no ha sido
+  // aprobado, que es justo uno de los casos que motivó este editor).
   const { data: targetProfile } = await admin
     .from('profiles')
-    .select('id, approved')
+    .select('id')
     .eq('id', userId)
     .single();
   if (!targetProfile) {
     return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
   }
 
-  // IMPORTANTE: pedimos .select() para que el upsert devuelva la fila escrita.
-  // Si esto viene vacío sin error, es señal de que algo (RLS, trigger, o un
-  // client mal inicializado) está silenciando la escritura.
+  // Nota: NO tocamos `locked` al hacer este upsert. Si la predicción ya
+  // estaba confirmada (locked=true) por el usuario, se mantiene tal cual;
+  // si quieres que el admin pueda además bloquear/desbloquear, dímelo y
+  // añado un campo opcional `locked` al body.
   const { data: written, error: upsertErr } = await admin
     .from('predictions')
     .upsert(
@@ -120,8 +131,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Error al guardar: ' + upsertErr.message }, { status: 500 });
   }
   if (!written) {
-    // upsert "tuvo éxito" pero no devolvió fila: lo tratamos como fallo
-    // explícito en vez de responder ok:true engañosamente.
     return NextResponse.json(
       {
         error:
@@ -131,8 +140,6 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-
-  // Verificación extra: confirmar que el valor guardado coincide con el enviado
   if (written.pred_team1 !== pred1 || written.pred_team2 !== pred2) {
     return NextResponse.json(
       { error: 'El valor guardado no coincide con el enviado. Vuelve a intentarlo.' },
@@ -140,7 +147,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5) Si el partido ya tiene resultado, recalcular puntos
+  // Si el partido ya tiene resultado, recalculamos puntos para que el
+  // cambio se refleje también en la clasificación.
   if (match.result_team1 != null && match.result_team2 != null) {
     try {
       await recalculateMatchPoints(admin, matchId);
