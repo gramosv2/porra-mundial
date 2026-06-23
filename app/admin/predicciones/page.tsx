@@ -3,22 +3,60 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { EditPrediccionesClient } from './predicciones-client';
 import type { Match } from '@/types';
 
-// force-dynamic asegura que este Server Component se ejecute en cada
-// request (no se sirve desde caché estática). Lo combinamos con
-// revalidate = 0 como refuerzo explícito.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+
+type PredRow = {
+  id: number;
+  user_id: string;
+  match_id: number;
+  pred_team1: number;
+  pred_team2: number;
+  points_earned: number;
+};
+
+/**
+ * PostgREST (la API que usa Supabase) limita cada respuesta a un máximo de
+ * filas por defecto (1000 en la config estándar). Como la tabla `predictions`
+ * ya supera ese número de filas en total, un simple `.select()` sin rango
+ * se trunca SILENCIOSAMENTE: no da error, simplemente devuelve menos filas
+ * de las que existen. El recorte cae en partidos "al azar" según el orden
+ * físico de la tabla, lo que explica por qué algunos participantes parecían
+ * "sin predicción" en el panel aunque su fila existiera en la BD.
+ *
+ * Esta función pagina explícitamente con `.range()` hasta traer todas las
+ * filas, sin depender de ningún límite implícito.
+ */
+async function fetchAllPredictions(admin: ReturnType<typeof createAdminClient>) {
+  const PAGE_SIZE = 1000;
+  let from = 0;
+  let all: PredRow[] = [];
+
+  while (true) {
+    const { data, error } = await admin
+      .from('predictions')
+      .select('id, user_id, match_id, pred_team1, pred_team2, points_earned')
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error('Error paginando predictions:', error.message);
+      break;
+    }
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data as PredRow[]);
+
+    if (data.length < PAGE_SIZE) break; // última página
+    from += PAGE_SIZE;
+  }
+
+  return all;
+}
 
 /**
  * Editor admin de predicciones: todos los partidos por fecha. Al expandir uno
  * se ven (y editan) las predicciones de cada participante, y se pueden añadir
  * predicciones para los que no la tienen.
- *
- * NOTA sobre caché: el cliente de Supabase usa `fetch` por debajo, y Next.js
- * puede cachear llamadas a fetch incluso en rutas dinámicas si no se indica
- * lo contrario. Por eso forzamos cache: 'no-store' explícitamente en cada
- * query de este archivo, además de revalidatePath() en el endpoint que
- * escribe los datos.
  */
 export default async function AdminEditarPrediccionesPage() {
   await requireAdmin();
@@ -29,9 +67,7 @@ export default async function AdminEditarPrediccionesPage() {
     .select('*')
     .order('match_date', { ascending: true });
 
-  const { data: preds } = await admin
-    .from('predictions')
-    .select('id, user_id, match_id, pred_team1, pred_team2, points_earned');
+  const preds = await fetchAllPredictions(admin);
 
   const { data: profiles } = await admin
     .from('profiles')
@@ -39,17 +75,8 @@ export default async function AdminEditarPrediccionesPage() {
     .eq('approved', true)
     .order('display_name', { ascending: true });
 
-  type PredRow = {
-    id: number;
-    user_id: string;
-    match_id: number;
-    pred_team1: number;
-    pred_team2: number;
-    points_earned: number;
-  };
-
   const byMatch = new Map<number, PredRow[]>();
-  for (const p of (preds ?? []) as PredRow[]) {
+  for (const p of preds) {
     const arr = byMatch.get(p.match_id) ?? [];
     arr.push(p);
     byMatch.set(p.match_id, arr);
