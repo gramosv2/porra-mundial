@@ -3,13 +3,22 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { EditPrediccionesClient } from './predicciones-client';
 import type { Match } from '@/types';
 
+// force-dynamic asegura que este Server Component se ejecute en cada
+// request (no se sirve desde caché estática). Lo combinamos con
+// revalidate = 0 como refuerzo explícito.
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 /**
  * Editor admin de predicciones: todos los partidos por fecha. Al expandir uno
  * se ven (y editan) las predicciones de cada participante, y se pueden añadir
- * predicciones para los que no la tienen (p.ej. alguien que se unió tarde).
- * Usa el admin client para ver/escribir todo saltándose la RLS.
+ * predicciones para los que no la tienen.
+ *
+ * NOTA sobre caché: el cliente de Supabase usa `fetch` por debajo, y Next.js
+ * puede cachear llamadas a fetch incluso en rutas dinámicas si no se indica
+ * lo contrario. Por eso forzamos cache: 'no-store' explícitamente en cada
+ * query de este archivo, además de revalidatePath() en el endpoint que
+ * escribe los datos.
  */
 export default async function AdminEditarPrediccionesPage() {
   await requireAdmin();
