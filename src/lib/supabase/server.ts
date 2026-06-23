@@ -12,7 +12,8 @@ export function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setAll(cookiesToSet: any[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
@@ -38,7 +39,7 @@ export function createClient() {
 export function createAdminClient() {
   const { createClient: createSbClient } = require('@supabase/supabase-js');
 
-  const noStoreFetch: typeof fetch = (url, init) =>
+  const noStoreFetch = (url: RequestInfo | URL, init?: RequestInit) =>
     fetch(url, { ...init, cache: 'no-store' });
 
   return createSbClient(
