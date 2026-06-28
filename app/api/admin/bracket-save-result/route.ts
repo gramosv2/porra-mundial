@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
-import { recalculateBracketSlot, resolveRealMatchup } from '@/lib/bracket-engine';
+import { recalculateAllBracketSlots, resolveRealMatchup } from '@/lib/bracket-engine';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -10,8 +11,12 @@ export const maxDuration = 60;
  * Body: { slotId, resultTeam1, resultTeam2, penaltyWinner?, realAdvancer }
  * `realAdvancer` es el NOMBRE del equipo (en inglés, igual que en `matches`)
  * que avanzó realmente de ronda. El sistema calcula solo el perdedor.
- * Guarda el resultado real de una casilla y dispara el recálculo (puntos +
- * cascada de ramas muertas) para todos los usuarios.
+ *
+ * Guarda el resultado real de una casilla y dispara un recálculo COMPLETO
+ * (recalculateAllBracketSlots) en vez de solo este slot. Es necesario para
+ * que CORREGIR un resultado ya cargado funcione bien: si antes una rama se
+ * marcó muerta por un dato erróneo, al corregirlo debe poder "revivir" —
+ * y eso solo lo garantiza recalcular todo desde cero en orden de fases.
  */
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -95,7 +100,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
-    await recalculateBracketSlot(admin, slotId);
+    await recalculateAllBracketSlots(admin);
+
+    try {
+      revalidatePath('/admin/cuadro');
+      revalidatePath('/cuadro');
+      revalidatePath('/clasificacion');
+      revalidatePath('/dashboard');
+    } catch {
+      // no crítico
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
