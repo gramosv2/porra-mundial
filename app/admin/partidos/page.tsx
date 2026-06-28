@@ -42,10 +42,20 @@ export default async function AdminMatchesPage() {
 
   const counts = await fetchPredictionCounts(supabase);
 
+  const { data: setting } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'open_rounds')
+    .maybeSingle();
+  const openRounds: string[] = Array.isArray(setting?.value)
+    ? (setting!.value as string[])
+    : ['grupos'];
+
   return (
     <MatchesAdminClient
       matches={(matches ?? []) as Match[]}
       predictionCounts={counts}
+      openRounds={openRounds}
     />
   );
 }

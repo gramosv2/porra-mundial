@@ -58,6 +58,24 @@ export const SCORING_CONFIG = {
   // estas horas para el partido. Pasada esa ventana, queda bloqueada en su
   // último estado.
   lock_hours_before_match: 2,
+
+  // --- CUADRO DE ELIMINATORIAS DINÁMICO (dieciseisavos en adelante) ---
+  // Mismo modelo aditivo que arriba (correct_result + exact_bonus opcional),
+  // multiplicado por la fase. Independiente de `phase_multipliers` para no
+  // tocar el sistema antiguo de `matches`/`predictions`.
+  bracket: {
+    correct_result: 3, // Acertar quién pasa de ronda (1X2, penaltis si aplica)
+    exact_bonus: 2,     // Extra si además clavas el marcador (90'/120')
+    wrong: 0,
+    phase_multipliers: {
+      r16: 1.5, // Dieciseisavos
+      r8: 2,    // Octavos
+      qf: 3,    // Cuartos
+      sf: 4,    // Semifinales
+      t3: 3,    // 3er puesto
+      f: 5,     // Final
+    },
+  },
 } as const;
 
 export type Phase = 'grupos' | keyof typeof SCORING_CONFIG.phase_multipliers;
@@ -109,6 +127,68 @@ export function isCorrectResult(
   realTeam2: number
 ): boolean {
   return Math.sign(predTeam1 - predTeam2) === Math.sign(realTeam1 - realTeam2);
+}
+
+// =====================================================================
+// CUADRO DE ELIMINATORIAS DINÁMICO — cálculo de puntos
+// =====================================================================
+// Independiente de calculateMatchPoints (que es del sistema antiguo de
+// `matches`/`predictions`). Aquí el "ganador de la eliminatoria" puede venir
+// de los penaltis si el marcador a 90' fue empate, así que se compara aparte
+// del marcador exacto.
+import type { BracketPhase } from './bracket';
+
+export interface BracketScoreInput {
+  predTeam1: number;
+  predTeam2: number;
+  predPenaltyWinner: 1 | 2 | null; // 1 = pred_team1, 2 = pred_team2, null si no hubo empate predicho
+  realTeam1: number;
+  realTeam2: number;
+  realPenaltyWinner: 1 | 2 | null;
+  phase: BracketPhase;
+}
+
+/** ¿A quién dio como avanzante de ronda una predicción (1 o 2)? */
+export function bracketPredictedWinner(
+  predTeam1: number,
+  predTeam2: number,
+  predPenaltyWinner: 1 | 2 | null
+): 1 | 2 {
+  if (predTeam1 !== predTeam2) return predTeam1 > predTeam2 ? 1 : 2;
+  // Empate a 90': decide la predicción de penaltis (si no se dio, asumimos 1 por defecto)
+  return predPenaltyWinner ?? 1;
+}
+
+/** ¿A quién dio el resultado real como avanzante de ronda? */
+export function bracketRealWinner(
+  realTeam1: number,
+  realTeam2: number,
+  realPenaltyWinner: 1 | 2 | null
+): 1 | 2 {
+  if (realTeam1 !== realTeam2) return realTeam1 > realTeam2 ? 1 : 2;
+  return realPenaltyWinner ?? 1;
+}
+
+/**
+ * Calcula los puntos de una casilla del bracket.
+ * - Acierta quién avanza (1X2 o penaltis) → correct_result × multiplicador
+ * - Además clava el marcador a 90'/120'    → + exact_bonus × multiplicador
+ * - Falla quién avanza                     → 0 (no puede haber acertado el marcador)
+ */
+export function calculateBracketPoints(input: BracketScoreInput): number {
+  const cfg = SCORING_CONFIG.bracket;
+  const multiplier = cfg.phase_multipliers[input.phase];
+
+  const predWinner = bracketPredictedWinner(input.predTeam1, input.predTeam2, input.predPenaltyWinner);
+  const realWinner = bracketRealWinner(input.realTeam1, input.realTeam2, input.realPenaltyWinner);
+
+  if (predWinner !== realWinner) return cfg.wrong;
+
+  let points: number = cfg.correct_result;
+  if (input.predTeam1 === input.realTeam1 && input.predTeam2 === input.realTeam2) {
+    points += cfg.exact_bonus;
+  }
+  return Math.round(points * multiplier);
 }
 
 // Etiqueta legible de una fase
