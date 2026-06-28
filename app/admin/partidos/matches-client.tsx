@@ -9,14 +9,10 @@ import { formatMadridDate, formatMadridTime, teamFlag, teamES } from '@/lib/util
 import { PHASE_LABELS } from '@/config/scoring';
 import type { Match, MatchStatus } from '@/types';
 
+// Las eliminatorias (r32/r16/cuartos/semis/tercero/final) ahora se gestionan
+// desde el cuadro dinámico (/admin/cuadro). Este panel solo gestiona grupos.
 const PHASES: Array<{ id: Match['phase']; label: string }> = [
   { id: 'grupos', label: PHASE_LABELS.grupos },
-  { id: 'r32', label: PHASE_LABELS.r32 },
-  { id: 'r16', label: PHASE_LABELS.r16 },
-  { id: 'cuartos', label: PHASE_LABELS.cuartos },
-  { id: 'semis', label: PHASE_LABELS.semis },
-  { id: 'tercero', label: PHASE_LABELS.tercero },
-  { id: 'final', label: PHASE_LABELS.final },
 ];
 
 interface Props {
@@ -161,40 +157,42 @@ export function MatchesAdminClient({ matches, predictionCounts, openRounds }: Pr
         </div>
       )}
 
-      {/* Phase tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2">
-        {PHASES.map((p) => {
-          const active = phase === p.id;
-          const isOpen = rounds.includes(p.id);
-          return (
-            <button
-              key={p.id}
-              onClick={() => setPhase(p.id)}
-              className={
-                'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap border flex items-center gap-1.5 ' +
-                (active
-                  ? 'bg-accent text-black border-accent'
-                  : 'bg-surface text-text-muted border-border hover:text-text hover:border-border')
-              }
-            >
-              <span
+      {/* Phase tabs (solo si hay más de una fase disponible) */}
+      {PHASES.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2">
+          {PHASES.map((p) => {
+            const active = phase === p.id;
+            const isOpen = rounds.includes(p.id);
+            return (
+              <button
+                key={p.id}
+                onClick={() => setPhase(p.id)}
                 className={
-                  'w-1.5 h-1.5 rounded-full ' +
-                  (isOpen
-                    ? active
-                      ? 'bg-black'
-                      : 'bg-accent'
-                    : active
-                      ? 'bg-black/40'
-                      : 'bg-text-muted/40')
+                  'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap border flex items-center gap-1.5 ' +
+                  (active
+                    ? 'bg-accent text-black border-accent'
+                    : 'bg-surface text-text-muted border-border hover:text-text hover:border-border')
                 }
-                title={isOpen ? 'Predicciones abiertas' : 'Predicciones cerradas'}
-              />
-              {p.label}
-            </button>
-          );
-        })}
-      </div>
+              >
+                <span
+                  className={
+                    'w-1.5 h-1.5 rounded-full ' +
+                    (isOpen
+                      ? active
+                        ? 'bg-black'
+                        : 'bg-accent'
+                      : active
+                        ? 'bg-black/40'
+                        : 'bg-text-muted/40')
+                  }
+                  title={isOpen ? 'Predicciones abiertas' : 'Predicciones cerradas'}
+                />
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Control de apertura de la ronda actual */}
       <div

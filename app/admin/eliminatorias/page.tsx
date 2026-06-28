@@ -1,17 +1,9 @@
-import { createClient } from '@/lib/supabase/server';
-import { EliminatoriasClient } from './eliminatorias-client';
-import type { Match } from '@/types';
+import { redirect } from 'next/navigation';
 
-export const dynamic = 'force-dynamic';
-
-export default async function AdminEliminatoriasPage() {
-  const supabase = createClient();
-
-  const { data: matches } = await supabase
-    .from('matches')
-    .select('*')
-    .neq('phase', 'grupos')
-    .order('match_date', { ascending: true });
-
-  return <EliminatoriasClient matches={(matches ?? []) as Match[]} />;
+// Esta página gestionaba las eliminatorias con el sistema viejo
+// (matches/predictions con equipos fijos editados a mano). Ahora esas
+// rondas se gestionan con el cuadro dinámico. Se mantiene el archivo por
+// si hace falta consultar el código antiguo, pero ya no es accesible.
+export default function AdminEliminatoriasPage() {
+  redirect('/admin/cuadro');
 }

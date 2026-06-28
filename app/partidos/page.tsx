@@ -14,6 +14,9 @@ export default async function PartidosPage({
   const { data: matches } = await supabase
     .from('matches')
     .select('*')
+    // Las eliminatorias (r32/r16/cuartos/semis/tercero/final) ahora se
+    // gestionan desde el cuadro dinámico (/cuadro), no aquí.
+    .eq('phase', 'grupos')
     .order('match_date', { ascending: true });
 
   const { data: myPreds } = await supabase
@@ -62,7 +65,9 @@ export default async function PartidosPage({
       <div className="mb-8">
         <h1 className="font-display text-4xl font-bold">Partidos</h1>
         <p className="text-text-muted text-sm mt-1">
-          {matches?.length ?? 0} partidos totales · predice antes de que cierren
+          {matches?.length ?? 0} partidos de fase de grupos · predice antes de que cierren.{' '}
+          Las eliminatorias se predicen en{' '}
+          <a href="/cuadro" className="text-accent underline">el Cuadro</a>.
         </p>
       </div>
 

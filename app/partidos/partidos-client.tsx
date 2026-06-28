@@ -8,7 +8,9 @@ import { PHASE_LABELS, SCORING_CONFIG, type Phase } from '@/config/scoring';
 import { cn } from '@/lib/utils';
 import type { Match, Prediction } from '@/types';
 
-const PHASES: Phase[] = ['grupos', 'r32', 'r16', 'cuartos', 'semis', 'tercero', 'final'];
+// Las eliminatorias (r32/r16/cuartos/semis/tercero/final) ahora se gestionan
+// desde el cuadro dinámico (/cuadro). Esta pantalla solo predice grupos.
+const PHASES: Phase[] = ['grupos'];
 const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
 
 interface Props {
@@ -168,27 +170,29 @@ export function PartidosClient({
         )
       ) : (
         <>
-          {/* Phase tabs */}
-          <div className="flex flex-wrap gap-2 mb-4 overflow-x-auto pb-2">
-            {PHASES.map((p) => {
-              const isOpen = openRounds.includes(p);
-              return (
-                <button
-                  key={p}
-                  onClick={() => setPhase(p)}
-                  className={cn(
-                    'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap flex items-center gap-1.5',
-                    phase === p
-                      ? 'bg-accent text-black'
-                      : 'bg-surface border border-border text-text-muted hover:text-text hover:border-accent/50'
-                  )}
-                >
-                  {!isOpen && <span title="Predicciones cerradas">🔒</span>}
-                  {PHASE_LABELS[p]}
-                </button>
-              );
-            })}
-          </div>
+          {/* Phase tabs (solo se muestran si hay más de una fase disponible) */}
+          {PHASES.length > 1 && (
+            <div className="flex flex-wrap gap-2 mb-4 overflow-x-auto pb-2">
+              {PHASES.map((p) => {
+                const isOpen = openRounds.includes(p);
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPhase(p)}
+                    className={cn(
+                      'px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap flex items-center gap-1.5',
+                      phase === p
+                        ? 'bg-accent text-black'
+                        : 'bg-surface border border-border text-text-muted hover:text-text hover:border-accent/50'
+                    )}
+                  >
+                    {!isOpen && <span title="Predicciones cerradas">🔒</span>}
+                    {PHASE_LABELS[p]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Group sub-tabs (solo en fase de grupos) */}
           {phase === 'grupos' && (
