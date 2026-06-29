@@ -3,11 +3,9 @@ import {
   BRACKET_SLOTS_BY_ID,
   BRACKET_PHASE_ORDER,
   T3_USES_LOSERS,
-  getDescendantSlots,
   type BracketPhase,
 } from '@/config/bracket';
 import {
-  calculateBracketPoints,
   bracketPredictedWinner,
   SCORING_CONFIG,
 } from '@/config/scoring';
@@ -137,6 +135,180 @@ export function resolveUserBracket(
 }
 
 // ---------------------------------------------------------------------
+// "Vida real" de los equipos, independiente de cualquier usuario: para
+// cada fase, qué equipos han avanzado de verdad hasta ahí, y qué equipos
+// ya han sido eliminados de verdad en cualquier ronda anterior.
+//
+// Esto es la pieza central del nuevo modelo: la vida de un equipo en el
+// cuadro de un usuario depende SOLO de si ese equipo, individualmente,
+// sigue ganando sus partidos reales — no de si el cruce que el usuario
+// había imaginado para él era el correcto.
+// ---------------------------------------------------------------------
+
+export interface RealLifeState {
+  /** Equipos reales que han sido eliminados en cualquier ronda ya finalizada. */
+  eliminatedTeams: Set<string>;
+  /** Por fase, equipos reales que avanzan a ESA fase (solo si la ronda
+   *  anterior está completamente finalizada; si no, el set está vacío y
+   *  `phaseReady[phase]` es false). */
+  advancersByPhase: Record<BracketPhase, Set<string>>;
+  /** Si la ronda que alimenta a esa fase ya está 100% finalizada en la realidad. */
+  phaseReady: Record<BracketPhase, boolean>;
+}
+
+const PHASE_FEEDER_SLOTS: Record<BracketPhase, string[]> = {
+  r16: [], // r16 no tiene ronda anterior (equipos fijos desde el inicio)
+  r8: ['R16_1', 'R16_2', 'R16_3', 'R16_4', 'R16_5', 'R16_6', 'R16_7', 'R16_8',
+       'R16_9', 'R16_10', 'R16_11', 'R16_12', 'R16_13', 'R16_14', 'R16_15', 'R16_16'],
+  qf: ['R8_1', 'R8_2', 'R8_3', 'R8_4', 'R8_5', 'R8_6', 'R8_7', 'R8_8'],
+  sf: ['QF_1', 'QF_2', 'QF_3', 'QF_4'],
+  f: ['SF_1', 'SF_2'],
+  t3: ['SF_1', 'SF_2'],
+};
+
+/**
+ * Construye el estado de vida real de todos los equipos a partir del
+ * árbol de slots (con sus resultados reales ya cargados por el admin).
+ * Es un cálculo puramente derivado de `allSlots`, sin tocar predicciones.
+ */
+export function computeRealLifeState(allSlots: BracketSlot[]): RealLifeState {
+  const slotsById = new Map(allSlots.map((s) => [s.id, s]));
+  const eliminatedTeams = new Set<string>();
+  const advancersByPhase = {} as Record<BracketPhase, Set<string>>;
+  const phaseReady = {} as Record<BracketPhase, boolean>;
+
+  for (const phase of BRACKET_PHASE_ORDER) {
+    const feeders = PHASE_FEEDER_SLOTS[phase];
+    if (feeders.length === 0) {
+      // r16: no depende de ninguna ronda anterior, siempre "lista".
+      advancersByPhase[phase] = new Set();
+      phaseReady[phase] = true;
+      continue;
+    }
+
+    const ready = feeders.every((id) => slotsById.get(id)?.status === 'finished');
+    phaseReady[phase] = ready;
+
+    const advancers = new Set<string>();
+    if (ready) {
+      for (const id of feeders) {
+        const row = slotsById.get(id);
+        if (!row) continue;
+        const adv = phase === 't3' ? row.real_loser : row.real_advancer;
+        const elim = phase === 't3' ? row.real_advancer : row.real_loser;
+        if (adv) advancers.add(adv);
+        // El equipo que NO avanza a la fase normal queda eliminado del
+        // todo (salvo en t3, que es el cruce de perdedores: ahí el que
+        // "elimina" es el ganador real de esa semifinal).
+        if (phase !== 't3' && elim) eliminatedTeams.add(elim);
+      }
+    }
+    advancersByPhase[phase] = advancers;
+  }
+
+  return { eliminatedTeams, advancersByPhase, phaseReady };
+}
+
+/**
+ * ¿Sigue vivo este equipo en la realidad, a la altura de la fase dada?
+ * "Vivo" = no ha sido eliminado todavía en ninguna ronda ya finalizada.
+ * Si la fase todavía no es alcanzable (ronda anterior sin terminar), no
+ * podemos afirmar nada: devolvemos null (desconocido).
+ *
+ * Caso especial r16: ahí no hay "ronda anterior" que resolver — la pregunta
+ * es directamente si ESE partido de dieciseisavos concreto ya tiene
+ * resultado real y si el equipo elegido fue quien avanzó. Por eso este caso
+ * se resuelve aparte, mirando el propio slot, no `state`.
+ */
+function isTeamRealAdvancer(
+  state: RealLifeState,
+  allSlots: BracketSlot[],
+  phase: BracketPhase,
+  slotId: string,
+  team: string | null
+): boolean | null {
+  if (!team) return null;
+
+  if (phase === 'r16') {
+    const row = allSlots.find((s) => s.id === slotId);
+    if (!row || row.status !== 'finished' || !row.real_advancer) return null;
+    return row.real_advancer === team;
+  }
+
+  if (!state.phaseReady[phase]) return null;
+  return state.advancersByPhase[phase].has(team);
+}
+
+// ---------------------------------------------------------------------
+// Evaluación de UNA casilla para UN usuario: combina el nuevo modelo de
+// "vida por equipo" con el bonus de marcador exacto (que sigue exigiendo
+// que el CRUCE COMPLETO coincida con el real).
+// ---------------------------------------------------------------------
+
+export interface SlotEvaluation {
+  /** true / false / null (todavía no se puede evaluar, falta info) */
+  advancerAlive: boolean | null;
+  /** El cruce que el usuario predijo coincide exactamente con el real (ambos equipos) */
+  exactMatchup: boolean;
+  points: number;
+  /** Si esta elección del usuario debe marcarse is_dead (su equipo ya fue eliminado de verdad) */
+  isDead: boolean;
+}
+
+export function evaluateUserSlot(
+  state: RealLifeState,
+  allSlots: BracketSlot[],
+  phase: BracketPhase,
+  resolvedSlot: ResolvedSlot,
+  pred: BracketPrediction
+): SlotEvaluation {
+  const chosenTeam = resolvedSlot.predictedAdvancer;
+
+  const advancerAlive = isTeamRealAdvancer(state, allSlots, phase, resolvedSlot.slotId, chosenTeam);
+
+  if (advancerAlive === null) {
+    return { advancerAlive: null, exactMatchup: false, points: 0, isDead: false };
+  }
+
+  if (!advancerAlive) {
+    // El equipo que elegiste ya fue eliminado de verdad: 0 puntos, muere.
+    return { advancerAlive: false, exactMatchup: false, points: 0, isDead: true };
+  }
+
+  // Tu equipo sigue vivo de verdad → ganas el 1X2 (correct_result).
+  let points = SCORING_CONFIG.bracket.correct_result;
+
+  // ¿El cruce completo (ambos equipos) coincide con el real? Solo entonces
+  // puede haber bonus de marcador exacto.
+  const { team1: realTeam1, team2: realTeam2 } = resolveRealMatchup(allSlots, resolvedSlot.slotId);
+  const exactMatchup =
+    !!realTeam1 &&
+    !!realTeam2 &&
+    ((resolvedSlot.team1 === realTeam1 && resolvedSlot.team2 === realTeam2) ||
+      (resolvedSlot.team1 === realTeam2 && resolvedSlot.team2 === realTeam1));
+
+  if (exactMatchup && pred.pred_team1 != null && pred.pred_team2 != null) {
+    // Orientamos el marcador del usuario al mismo orden que el real para comparar.
+    const userOriented =
+      resolvedSlot.team1 === realTeam1
+        ? { t1: pred.pred_team1, t2: pred.pred_team2 }
+        : { t1: pred.pred_team2, t2: pred.pred_team1 };
+
+    const slotRow = allSlots.find((s) => s.id === resolvedSlot.slotId);
+    if (
+      slotRow?.result_team1 != null &&
+      slotRow?.result_team2 != null &&
+      userOriented.t1 === slotRow.result_team1 &&
+      userOriented.t2 === slotRow.result_team2
+    ) {
+      points += SCORING_CONFIG.bracket.exact_bonus;
+    }
+  }
+
+  return { advancerAlive: true, exactMatchup, points, isDead: false };
+}
+
+// ---------------------------------------------------------------------
 // Extras por predicción: puntos que SÍ dependen de resultados reales.
 //
 // Regla: el extra de una fase (cuartos/semis/final) se calcula cuando la
@@ -162,25 +334,6 @@ export interface BracketExtras {
   points: number; // suma total de los extras anteriores
 }
 
-function allFinished(allSlots: BracketSlot[], slotIds: string[]): boolean {
-  const byId = new Map(allSlots.map((s) => [s.id, s]));
-  return slotIds.every((id) => byId.get(id)?.status === 'finished');
-}
-
-function realAdvancersOf(allSlots: BracketSlot[], slotIds: string[]): Set<string> {
-  const byId = new Map(allSlots.map((s) => [s.id, s]));
-  const out = new Set<string>();
-  for (const id of slotIds) {
-    const adv = byId.get(id)?.real_advancer;
-    if (adv) out.add(adv);
-  }
-  return out;
-}
-
-const QF_FEEDER_SLOTS = ['R8_1', 'R8_2', 'R8_3', 'R8_4', 'R8_5', 'R8_6', 'R8_7', 'R8_8'];
-const SF_FEEDER_SLOTS = ['QF_1', 'QF_2', 'QF_3', 'QF_4'];
-const F_FEEDER_SLOTS = ['SF_1', 'SF_2'];
-
 /**
  * Calcula los puntos extra de UN usuario, comparando lo que predijo (a
  * través de `resolved`, el bracket ya resuelto según SUS elecciones)
@@ -189,13 +342,11 @@ const F_FEEDER_SLOTS = ['SF_1', 'SF_2'];
  */
 export function calculateUserBracketExtras(
   resolved: Map<string, ResolvedSlot>,
-  allSlots: BracketSlot[],
+  state: RealLifeState,
   realChampion: string | null
 ): BracketExtras {
   const cfg = SCORING_CONFIG.bracket_advance_bonus;
 
-  // Equipos que el usuario predijo para cada casilla de la fase (su propia
-  // elección, resuelta en cascada desde dieciseisavos).
   function userTeamsInPhase(phase: 'qf' | 'sf' | 'f'): Set<string> {
     const out = new Set<string>();
     const slotIds = phase === 'f' ? ['F'] : BRACKET_SLOTS.filter((s) => s.phase === phase).map((s) => s.id);
@@ -215,20 +366,9 @@ export function calculateUserBracketExtras(
     return n;
   }
 
-  const qfReady = allFinished(allSlots, QF_FEEDER_SLOTS);
-  const qfHits = qfReady
-    ? countHits(userTeamsInPhase('qf'), realAdvancersOf(allSlots, QF_FEEDER_SLOTS))
-    : 0;
-
-  const sfReady = allFinished(allSlots, SF_FEEDER_SLOTS);
-  const sfHits = sfReady
-    ? countHits(userTeamsInPhase('sf'), realAdvancersOf(allSlots, SF_FEEDER_SLOTS))
-    : 0;
-
-  const fReady = allFinished(allSlots, F_FEEDER_SLOTS);
-  const fHits = fReady
-    ? countHits(userTeamsInPhase('f'), realAdvancersOf(allSlots, F_FEEDER_SLOTS))
-    : 0;
+  const qfHits = state.phaseReady.qf ? countHits(userTeamsInPhase('qf'), state.advancersByPhase.qf) : 0;
+  const sfHits = state.phaseReady.sf ? countHits(userTeamsInPhase('sf'), state.advancersByPhase.sf) : 0;
+  const fHits = state.phaseReady.f ? countHits(userTeamsInPhase('f'), state.advancersByPhase.f) : 0;
 
   const finalSlot = resolved.get('F');
   const userChampion = finalSlot?.predictedAdvancer ?? null;
@@ -247,141 +387,60 @@ export function calculateUserBracketExtras(
 }
 
 // ---------------------------------------------------------------------
-// Recalcular UNA casilla con resultado real: marca puntos + propaga
-// is_dead a toda la rama descendiente de cada usuario que falló el 1x2.
+// Recálculo: con el nuevo modelo, una casilla concreta solo puede
+// evaluarse de forma fiable recalculando TODO el bracket del usuario
+// (la vida de su equipo puede depender de resultados de otras ramas).
 // ---------------------------------------------------------------------
 
-
 /**
- * Se llama cuando el admin guarda el resultado real de un slot (bracket_slots
- * con result_team1/result_team2 ya actualizado, status='finished').
- * Recorre TODAS las predicciones de ese slot, calcula puntos, y si alguien
- * falló el ganador, marca is_dead=true en cascada para su rama completa.
+ * Recalcula el bracket COMPLETO de un usuario: re-evalúa las 32 casillas
+ * con el modelo de "vida por equipo", actualiza points_earned/is_dead de
+ * cada predicción, y devuelve el total de puntos de partidos (sin extras).
  */
-export async function recalculateBracketSlot(supabase: AdminClient, slotId: string) {
-  const { data: slotRow, error: slotErr } = await supabase
-    .from('bracket_slots')
-    .select('*')
-    .eq('id', slotId)
-    .single();
-  if (slotErr || !slotRow) throw new Error('Slot no encontrado');
-  if (slotRow.result_team1 == null || slotRow.result_team2 == null) {
-    throw new Error('El slot no tiene resultado real todavía');
-  }
-  if (!slotRow.real_advancer) {
-    throw new Error('Falta indicar qué equipo avanzó realmente en este slot');
-  }
+async function recalculateOneUserBracket(
+  supabase: AdminClient,
+  userId: string,
+  allSlots: BracketSlot[],
+  state: RealLifeState,
+  userPreds: Map<string, BracketPrediction>
+): Promise<number> {
+  const resolved = resolveUserBracket(allSlots, userPreds);
+  let total = 0;
 
-  const { data: allSlots, error: allSlotsErr } = await supabase.from('bracket_slots').select('*');
-  if (allSlotsErr || !allSlots) throw new Error('No se pudo leer el árbol de slots');
-
-  const { data: allPreds, error: predsErr } = await supabase
-    .from('bracket_predictions')
-    .select('*');
-  if (predsErr) throw predsErr;
-
-  const predsByUser = new Map<string, Map<string, BracketPrediction>>();
-  for (const p of (allPreds ?? []) as BracketPrediction[]) {
-    if (!predsByUser.has(p.user_id)) predsByUser.set(p.user_id, new Map());
-    predsByUser.get(p.user_id)!.set(p.slot_id, p);
-  }
-
-  const realAdvancerName = slotRow.real_advancer as string;
-  const { team1: realTeam1Name, team2: realTeam2Name } = resolveRealMatchup(
-    allSlots as BracketSlot[],
-    slotId
-  );
-
-  const affectedUsers = new Set<string>();
-
-  for (const [userId, userPreds] of predsByUser) {
-    const pred = userPreds.get(slotId);
-    if (!pred) continue; // no predijo esta casilla, nada que hacer
-    if (pred.is_dead) continue; // su rama ya estaba muerta antes de esta ronda
-
-    const resolvedForUser = resolveUserBracket(allSlots as BracketSlot[], userPreds);
-    const resolvedSlot = resolvedForUser.get(slotId);
-
-    // Si no se conocen ambos equipos para este usuario en este slot, no se puede evaluar.
-    if (!resolvedSlot?.team1 || !resolvedSlot?.team2) continue;
+  for (const def of BRACKET_SLOTS) {
+    const pred = userPreds.get(def.id);
+    if (!pred) continue;
     if (pred.pred_team1 == null || pred.pred_team2 == null) continue;
 
-    // ¿El cruce que predijo este usuario es realmente el mismo cruce que pasó
-    // en la vida real? (mismos dos equipos, en cualquier orden). Si predijo
-    // un rival distinto al real (su rama anterior ya iba mal pero todavía no
-    // se había marcado, p.ej. orden de carga de resultados), no se evalúa
-    // como acierto ni como fallo "nuevo": su rama ya debería estar muerta por
-    // la ronda anterior. Por seguridad, si no coincide el cruce, lo damos
-    // por fallo (no puede haber acertado un cruce que no era el real).
-    const sameMatchup =
-      (resolvedSlot.team1 === realTeam1Name && resolvedSlot.team2 === realTeam2Name) ||
-      (resolvedSlot.team1 === realTeam2Name && resolvedSlot.team2 === realTeam1Name);
+    const resolvedSlot = resolved.get(def.id);
+    if (!resolvedSlot?.team1 || !resolvedSlot?.team2) continue; // todavía no se sabe el rival
 
-    let hit = false;
-    let points = 0;
+    const evalResult = evaluateUserSlot(state, allSlots, def.phase, resolvedSlot, pred);
 
-    if (sameMatchup) {
-      // ¿A qué equipo (nombre) dio el usuario como avanzante?
-      const predictedAdvancerName = resolvedSlot.predictedAdvancer;
-      hit = predictedAdvancerName === realAdvancerName;
+    // Si todavía no se puede evaluar (la fase no está "lista" en la
+    // realidad), dejamos la predicción como estaba (sin tocar puntos ni
+    // is_dead) — no hay nada que decidir aún.
+    if (evalResult.advancerAlive === null) continue;
 
-      // Para el marcador exacto, hay que orientar pred_team1/pred_team2 del
-      // usuario al mismo orden que el resultado real (team1/team2 pueden
-      // estar invertidos respecto a como los guardó el admin).
-      const userOriented =
-        resolvedSlot.team1 === realTeam1Name
-          ? { t1: pred.pred_team1, t2: pred.pred_team2, pw: pred.pred_penalty_winner }
-          : { t1: pred.pred_team2, t2: pred.pred_team1, pw: invertPenalty(pred.pred_penalty_winner) };
-
-      points = calculateBracketPoints({
-        predTeam1: userOriented.t1,
-        predTeam2: userOriented.t2,
-        predPenaltyWinner: userOriented.pw,
-        realTeam1: slotRow.result_team1,
-        realTeam2: slotRow.result_team2,
-        realPenaltyWinner: slotRow.real_penalty_winner,
-        phase: slotRow.phase as BracketPhase,
-      });
-    }
+    total += evalResult.points;
 
     await supabase
       .from('bracket_predictions')
-      .update({ points_earned: points })
+      .update({ points_earned: evalResult.points, is_dead: evalResult.isDead })
       .eq('id', pred.id);
-
-    if (!hit) {
-      await markBranchDead(supabase, userId, slotId);
-    }
-
-    affectedUsers.add(userId);
   }
 
-  for (const userId of affectedUsers) {
-    await recalculateUserBracketTotal(supabase, userId);
-  }
-}
-
-function invertPenalty(pw: 1 | 2 | null): 1 | 2 | null {
-  if (pw === 1) return 2;
-  if (pw === 2) return 1;
-  return null;
-}
-
-/** Marca is_dead=true en una casilla y en TODA su rama descendiente, para un usuario. */
-async function markBranchDead(supabase: AdminClient, userId: string, slotId: string) {
-  const slotsToKill = [slotId, ...getDescendantSlots(slotId)];
-
-  await supabase
-    .from('bracket_predictions')
-    .update({ is_dead: true })
-    .eq('user_id', userId)
-    .in('slot_id', slotsToKill);
+  return total;
 }
 
 /**
  * Suma todos los puntos de bracket de un usuario (partidos acertados +
  * extras por predicción: equipos en cuartos/semis/final + campeón) y
  * actualiza profiles.bracket_points / total_points.
+ *
+ * Asume que las predicciones de este usuario YA tienen points_earned/is_dead
+ * actualizados (recalculateOneUserBracket se encarga de eso); esta función
+ * solo agrega el total y añade los extras.
  */
 export async function recalculateUserBracketTotal(supabase: AdminClient, userId: string) {
   const { data: preds } = await supabase
@@ -396,16 +455,18 @@ export async function recalculateUserBracketTotal(supabase: AdminClient, userId:
     .reduce((acc, p) => acc + (p.points_earned ?? 0), 0);
 
   // Extras por predicción: necesitamos resolver el bracket de este usuario
-  // (equipos según sus propias elecciones) y el campeón real, si ya se sabe.
+  // (equipos según sus propias elecciones), el estado de vida real, y el
+  // campeón real, si ya se sabe.
   const { data: allSlots } = await supabase.from('bracket_slots').select('*');
   const slotsList = (allSlots ?? []) as BracketSlot[];
   const userPredsMap = new Map(userPredsList.map((p) => [p.slot_id, p]));
   const resolved = resolveUserBracket(slotsList, userPredsMap);
+  const state = computeRealLifeState(slotsList);
 
   const finalSlotRow = slotsList.find((s) => s.id === 'F');
   const realChampion = finalSlotRow?.real_advancer ?? null;
 
-  const extras = calculateUserBracketExtras(resolved, slotsList, realChampion);
+  const extras = calculateUserBracketExtras(resolved, state, realChampion);
 
   const bracketTotal = matchPoints + extras.points;
 
@@ -449,8 +510,9 @@ export async function setBracketGlobalLock(supabase: AdminClient, locked: boolea
 }
 
 /**
- * Recálculo completo desde cero: recorre TODOS los slots con resultado real
- * (en orden de fase) y reaplica is_dead + puntos. Útil tras corregir un
+ * Recálculo completo desde cero: para cada usuario, re-evalúa sus 32
+ * casillas con el modelo de "vida por equipo" (computeRealLifeState +
+ * evaluateUserSlot) y recompone sus puntos totales. Útil tras corregir un
  * resultado antiguo, o como utilidad de mantenimiento.
  */
 export async function recalculateAllBracketSlots(supabase: AdminClient) {
@@ -460,25 +522,23 @@ export async function recalculateAllBracketSlots(supabase: AdminClient) {
     .update({ is_dead: false, points_earned: 0 })
     .neq('id', -1);
 
-  // 2) Recorrer los slots con resultado real, en orden de fase (r16 → f/t3),
-  //    para que la cascada de "muerte" se propague correctamente.
-  const { data: finishedSlots } = await supabase
-    .from('bracket_slots')
-    .select('id, phase')
-    .eq('status', 'finished');
+  // 2) Estado de vida real de los equipos, calculado UNA vez para todos
+  //    los usuarios (es independiente de cualquier predicción).
+  const { data: allSlotsRaw } = await supabase.from('bracket_slots').select('*');
+  const allSlots = (allSlotsRaw ?? []) as BracketSlot[];
+  const state = computeRealLifeState(allSlots);
 
-  const sorted = (finishedSlots ?? []).sort(
-    (a: any, b: any) =>
-      BRACKET_PHASE_ORDER.indexOf(a.phase) - BRACKET_PHASE_ORDER.indexOf(b.phase)
-  );
-
-  for (const s of sorted) {
-    await recalculateBracketSlot(supabase, s.id);
+  // 3) Recorrer cada usuario, re-evaluar su cuadro completo, y recomponer
+  //    sus puntos totales (partidos + extras).
+  const { data: allPredsRaw } = await supabase.from('bracket_predictions').select('*');
+  const predsByUser = new Map<string, Map<string, BracketPrediction>>();
+  for (const p of (allPredsRaw ?? []) as BracketPrediction[]) {
+    if (!predsByUser.has(p.user_id)) predsByUser.set(p.user_id, new Map());
+    predsByUser.get(p.user_id)!.set(p.slot_id, p);
   }
 
-  // 3) Recalcular agregados de todos los usuarios afectados.
-  const { data: profiles } = await supabase.from('profiles').select('id');
-  for (const p of profiles ?? []) {
-    await recalculateUserBracketTotal(supabase, p.id);
+  for (const [userId, userPreds] of predsByUser) {
+    await recalculateOneUserBracket(supabase, userId, allSlots, state, userPreds);
+    await recalculateUserBracketTotal(supabase, userId);
   }
 }
