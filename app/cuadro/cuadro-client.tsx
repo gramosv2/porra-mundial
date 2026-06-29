@@ -135,64 +135,80 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
   }, [myPredictions]);
 
   // ---------------------------------------------------------------------
-  // Extras por predicción, en vivo: equipos distintos puestos en cada
-  // casilla de cuartos/semis/final (según las elecciones actuales, guardadas
-  // o no) + si el ganador de la Final coincide con el campeón real (si ya
-  // se conoce). Estos puntos se ganan al guardar, no dependen de que la
-  // rama siga viva.
-  //
-  // IMPORTANTE: solo cuenta un equipo en una fase si el usuario realmente
-  // rellenó el marcador de ESA casilla (no basta con que el rival ya se
-  // conozca por haber rellenado la ronda anterior).
+  // Extras por predicción: SOLO se cuentan cuando la ronda anterior
+  // completa ya tiene resultado real en TODOS sus partidos (no antes, y
+  // no partido a partido). Mismo criterio que calculateUserBracketExtras
+  // en src/lib/bracket-engine.ts — debe mantenerse igual en ambos sitios.
   // ---------------------------------------------------------------------
-  function hasLocalScore(slotId: string): boolean {
-    const e = local.get(slotId);
-    return !!e && e.t1 !== '' && e.t2 !== '';
+  const QF_FEEDER_SLOTS = ['R8_1', 'R8_2', 'R8_3', 'R8_4', 'R8_5', 'R8_6', 'R8_7', 'R8_8'];
+  const SF_FEEDER_SLOTS = ['QF_1', 'QF_2', 'QF_3', 'QF_4'];
+  const F_FEEDER_SLOTS = ['SF_1', 'SF_2'];
+
+  function allFinished(slotIds: string[]): boolean {
+    return slotIds.every((id) => slotsById.get(id)?.status === 'finished');
+  }
+
+  function realAdvancersOf(slotIds: string[]): Set<string> {
+    const out = new Set<string>();
+    for (const id of slotIds) {
+      const adv = slotsById.get(id)?.real_advancer;
+      if (adv) out.add(adv);
+    }
+    return out;
+  }
+
+  function userTeamsInPhase(phase: 'qf' | 'sf' | 'f'): Set<string> {
+    const out = new Set<string>();
+    const slotIds = phase === 'f' ? ['F'] : BRACKET_SLOTS.filter((s) => s.phase === phase).map((s) => s.id);
+    for (const id of slotIds) {
+      const r = resolved.get(id);
+      if (r?.team1) out.add(r.team1);
+      if (r?.team2) out.add(r.team2);
+    }
+    return out;
+  }
+
+  function countHits(userTeams: Set<string>, realTeams: Set<string>): number {
+    let n = 0;
+    for (const t of userTeams) if (realTeams.has(t)) n++;
+    return n;
   }
 
   const extras = useMemo(() => {
-    const qfTeams = new Set<string>();
-    for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
-      if (!hasLocalScore(def.id)) continue;
-      const r = resolved.get(def.id);
-      if (r?.team1) qfTeams.add(r.team1);
-      if (r?.team2) qfTeams.add(r.team2);
-    }
-    const sfTeams = new Set<string>();
-    for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
-      if (!hasLocalScore(def.id)) continue;
-      const r = resolved.get(def.id);
-      if (r?.team1) sfTeams.add(r.team1);
-      if (r?.team2) sfTeams.add(r.team2);
-    }
-    const fTeams = new Set<string>();
-    const finalResolved = resolved.get('F');
-    if (hasLocalScore('F')) {
-      if (finalResolved?.team1) fTeams.add(finalResolved.team1);
-      if (finalResolved?.team2) fTeams.add(finalResolved.team2);
-    }
+    const qfReady = allFinished(QF_FEEDER_SLOTS);
+    const qfCount = qfReady ? countHits(userTeamsInPhase('qf'), realAdvancersOf(QF_FEEDER_SLOTS)) : 0;
 
-    const userChampion = hasLocalScore('F') ? finalResolved?.advancer ?? null : null;
+    const sfReady = allFinished(SF_FEEDER_SLOTS);
+    const sfCount = sfReady ? countHits(userTeamsInPhase('sf'), realAdvancersOf(SF_FEEDER_SLOTS)) : 0;
+
+    const fReady = allFinished(F_FEEDER_SLOTS);
+    const fCount = fReady ? countHits(userTeamsInPhase('f'), realAdvancersOf(F_FEEDER_SLOTS)) : 0;
+
+    const finalResolved = resolved.get('F');
+    const userChampion = finalResolved?.advancer ?? null;
     const realChampion = slotsById.get('F')?.real_advancer ?? null;
     const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
     const championKnown = !!realChampion;
 
     const points =
-      qfTeams.size * SCORING_CONFIG.bracket_advance_bonus.qf +
-      sfTeams.size * SCORING_CONFIG.bracket_advance_bonus.sf +
-      fTeams.size * SCORING_CONFIG.bracket_advance_bonus.f +
+      qfCount * SCORING_CONFIG.bracket_advance_bonus.qf +
+      sfCount * SCORING_CONFIG.bracket_advance_bonus.sf +
+      fCount * SCORING_CONFIG.bracket_advance_bonus.f +
       (championHit ? SCORING_CONFIG.bracket_champion_bonus : 0);
 
     return {
-      qfCount: qfTeams.size,
-      sfCount: sfTeams.size,
-      fCount: fTeams.size,
+      qfCount,
+      qfReady,
+      sfCount,
+      sfReady,
+      fCount,
+      fReady,
       userChampion,
       championHit,
       championKnown,
       points,
     };
-  }, [resolved, slotsById, local]);
+  }, [resolved, slotsById]);
 
   const totalSlots = BRACKET_SLOTS.length;
   const filledSlots = useMemo(() => {
@@ -309,6 +325,7 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
             max={8}
             perTeam={SCORING_CONFIG.bracket_advance_bonus.qf}
             subtotal={extras.qfCount * SCORING_CONFIG.bracket_advance_bonus.qf}
+            ready={extras.qfReady}
           />
           <ExtraStat
             label="Equipos en semis"
@@ -316,6 +333,7 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
             max={4}
             perTeam={SCORING_CONFIG.bracket_advance_bonus.sf}
             subtotal={extras.sfCount * SCORING_CONFIG.bracket_advance_bonus.sf}
+            ready={extras.sfReady}
           />
           <ExtraStat
             label="Equipos en la final"
@@ -323,6 +341,7 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
             max={2}
             perTeam={SCORING_CONFIG.bracket_advance_bonus.f}
             subtotal={extras.fCount * SCORING_CONFIG.bracket_advance_bonus.f}
+            ready={extras.fReady}
           />
           <div className="rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
             <div className="text-[11px] text-text-muted mb-1">Campeón del Mundial</div>
@@ -619,22 +638,35 @@ function ExtraStat({
   max,
   perTeam,
   subtotal,
+  ready,
 }: {
   label: string;
   count: number;
   max: number;
   perTeam: number;
   subtotal: number;
+  ready: boolean;
 }) {
   return (
     <div className="rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
       <div className="text-[11px] text-text-muted mb-1">{label}</div>
-      <div className="text-sm font-semibold">
-        {count} / {max}
-      </div>
-      <div className="text-[11px] text-text-muted mt-1">
-        +{perTeam} pts c/u · <span className="text-text font-medium">+{subtotal} pts</span>
-      </div>
+      {ready ? (
+        <>
+          <div className="text-sm font-semibold">
+            {count} / {max}
+          </div>
+          <div className="text-[11px] text-text-muted mt-1">
+            +{perTeam} pts c/u · <span className="text-text font-medium">+{subtotal} pts</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="text-sm text-text-muted italic">Pendiente</div>
+          <div className="text-[11px] text-text-muted mt-1">
+            Se calcula cuando termine la ronda anterior
+          </div>
+        </>
+      )}
     </div>
   );
 }

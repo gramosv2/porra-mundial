@@ -137,87 +137,110 @@ export function resolveUserBracket(
 }
 
 // ---------------------------------------------------------------------
-// Extras por predicción: puntos que NO dependen de resultados reales
-// (cuartos/semis/final) más el extra de campeón (que sí depende del
-// resultado real de la Final).
+// Extras por predicción: puntos que SÍ dependen de resultados reales.
 //
-// "Cuartos/semis/final" se entiende como: el equipo que el usuario predijo
-// que JUEGA esa fase, según sus propias elecciones de ronda anterior — se
-// gana en el momento de guardar la predicción, independientemente de si
-// luego esa rama del propio cuadro del usuario fallase o quedase muerta.
+// Regla: el extra de una fase (cuartos/semis/final) se calcula cuando la
+// RONDA ANTERIOR COMPLETA ya tiene resultado real en TODOS sus partidos —
+// no antes, y no partido a partido. En ese momento se conoce el conjunto
+// exacto de equipos que pasan de verdad a esa fase, y se compara contra lo
+// que cada usuario puso en sus propias casillas de esa fase.
+//
+//   - Extra de cuartos  → exige que los 8 octavos (R8_1..R8_8) estén 'finished'
+//   - Extra de semis    → exige que los 4 cuartos (QF_1..QF_4) estén 'finished'
+//   - Extra de final    → exige que las 2 semis (SF_1, SF_2) estén 'finished'
+//   - Extra de campeón  → exige que la Final (F) esté 'finished'
+//
+// Antes de que la ronda anterior esté completa, el extra de esa fase es 0
+// — no se "promete" nada por adelantado.
 // ---------------------------------------------------------------------
 
 export interface BracketExtras {
-  qfTeams: number; // nº de equipos distintos que el usuario metió en cuartos (0-8)
-  sfTeams: number; // nº de equipos distintos que el usuario metió en semis (0-4)
-  fTeams: number; // nº de equipos distintos que el usuario metió en la final (0-2)
+  qfTeams: number; // nº de equipos reales-en-cuartos que el usuario acertó (0-8)
+  sfTeams: number; // nº de equipos reales-en-semis que el usuario acertó (0-4)
+  fTeams: number; // nº de equipos reales-en-la-final que el usuario acertó (0-2)
   championHit: boolean; // si su ganador de la Final coincide con el campeón real
   points: number; // suma total de los extras anteriores
 }
 
+function allFinished(allSlots: BracketSlot[], slotIds: string[]): boolean {
+  const byId = new Map(allSlots.map((s) => [s.id, s]));
+  return slotIds.every((id) => byId.get(id)?.status === 'finished');
+}
+
+function realAdvancersOf(allSlots: BracketSlot[], slotIds: string[]): Set<string> {
+  const byId = new Map(allSlots.map((s) => [s.id, s]));
+  const out = new Set<string>();
+  for (const id of slotIds) {
+    const adv = byId.get(id)?.real_advancer;
+    if (adv) out.add(adv);
+  }
+  return out;
+}
+
+const QF_FEEDER_SLOTS = ['R8_1', 'R8_2', 'R8_3', 'R8_4', 'R8_5', 'R8_6', 'R8_7', 'R8_8'];
+const SF_FEEDER_SLOTS = ['QF_1', 'QF_2', 'QF_3', 'QF_4'];
+const F_FEEDER_SLOTS = ['SF_1', 'SF_2'];
+
 /**
- * Calcula los puntos extra de UN usuario a partir de su bracket ya resuelto
- * (resolveUserBracket) y, si ya se conoce, el campeón real (el real_advancer
- * del slot 'F').
- *
- * IMPORTANTE: solo cuenta un equipo en una fase si el usuario REALMENTE
- * predijo algo en esa casilla concreta (tiene pred_team1/pred_team2
- * guardados ahí) — no basta con que el sistema ya sepa, por la ronda
- * anterior, quién jugaría esa fase. "Meter un equipo en cuartos" significa
- * que el usuario llegó a rellenar la casilla de cuartos, no que su octavos
- * ya determine el rival de cuartos.
+ * Calcula los puntos extra de UN usuario, comparando lo que predijo (a
+ * través de `resolved`, el bracket ya resuelto según SUS elecciones)
+ * contra los equipos que REALMENTE llegaron a cada fase — solo cuando esa
+ * ronda anterior ya está completamente resuelta en la realidad.
  */
 export function calculateUserBracketExtras(
   resolved: Map<string, ResolvedSlot>,
-  userPreds: Map<string, BracketPrediction>,
+  allSlots: BracketSlot[],
   realChampion: string | null
 ): BracketExtras {
   const cfg = SCORING_CONFIG.bracket_advance_bonus;
 
-  function hasPrediction(slotId: string): boolean {
-    const p = userPreds.get(slotId);
-    return !!p && p.pred_team1 != null && p.pred_team2 != null;
+  // Equipos que el usuario predijo para cada casilla de la fase (su propia
+  // elección, resuelta en cascada desde dieciseisavos).
+  function userTeamsInPhase(phase: 'qf' | 'sf' | 'f'): Set<string> {
+    const out = new Set<string>();
+    const slotIds = phase === 'f' ? ['F'] : BRACKET_SLOTS.filter((s) => s.phase === phase).map((s) => s.id);
+    for (const id of slotIds) {
+      const r = resolved.get(id);
+      if (r?.team1) out.add(r.team1);
+      if (r?.team2) out.add(r.team2);
+    }
+    return out;
   }
 
-  // Equipos únicos que el usuario predijo en cada fase: solo cuenta si la
-  // casilla de ESA fase tiene una predicción guardada (no basta con que el
-  // rival ya se conozca por la ronda anterior).
-  const qfTeamSet = new Set<string>();
-  for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
-    if (!hasPrediction(s.id)) continue;
-    const r = resolved.get(s.id);
-    if (r?.team1) qfTeamSet.add(r.team1);
-    if (r?.team2) qfTeamSet.add(r.team2);
+  function countHits(userTeams: Set<string>, realTeams: Set<string>): number {
+    let n = 0;
+    for (const t of userTeams) {
+      if (realTeams.has(t)) n++;
+    }
+    return n;
   }
 
-  const sfTeamSet = new Set<string>();
-  for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
-    if (!hasPrediction(s.id)) continue;
-    const r = resolved.get(s.id);
-    if (r?.team1) sfTeamSet.add(r.team1);
-    if (r?.team2) sfTeamSet.add(r.team2);
-  }
+  const qfReady = allFinished(allSlots, QF_FEEDER_SLOTS);
+  const qfHits = qfReady
+    ? countHits(userTeamsInPhase('qf'), realAdvancersOf(allSlots, QF_FEEDER_SLOTS))
+    : 0;
 
-  const fTeamSet = new Set<string>();
+  const sfReady = allFinished(allSlots, SF_FEEDER_SLOTS);
+  const sfHits = sfReady
+    ? countHits(userTeamsInPhase('sf'), realAdvancersOf(allSlots, SF_FEEDER_SLOTS))
+    : 0;
+
+  const fReady = allFinished(allSlots, F_FEEDER_SLOTS);
+  const fHits = fReady
+    ? countHits(userTeamsInPhase('f'), realAdvancersOf(allSlots, F_FEEDER_SLOTS))
+    : 0;
+
   const finalSlot = resolved.get('F');
-  if (hasPrediction('F')) {
-    if (finalSlot?.team1) fTeamSet.add(finalSlot.team1);
-    if (finalSlot?.team2) fTeamSet.add(finalSlot.team2);
-  }
-
-  const userChampion = hasPrediction('F') ? finalSlot?.predictedAdvancer ?? null : null;
+  const userChampion = finalSlot?.predictedAdvancer ?? null;
   const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
 
   const points =
-    qfTeamSet.size * cfg.qf +
-    sfTeamSet.size * cfg.sf +
-    fTeamSet.size * cfg.f +
-    (championHit ? SCORING_CONFIG.bracket_champion_bonus : 0);
+    qfHits * cfg.qf + sfHits * cfg.sf + fHits * cfg.f + (championHit ? SCORING_CONFIG.bracket_champion_bonus : 0);
 
   return {
-    qfTeams: qfTeamSet.size,
-    sfTeams: sfTeamSet.size,
-    fTeams: fTeamSet.size,
+    qfTeams: qfHits,
+    sfTeams: sfHits,
+    fTeams: fHits,
     championHit,
     points,
   };
@@ -227,6 +250,7 @@ export function calculateUserBracketExtras(
 // Recalcular UNA casilla con resultado real: marca puntos + propaga
 // is_dead a toda la rama descendiente de cada usuario que falló el 1x2.
 // ---------------------------------------------------------------------
+
 
 /**
  * Se llama cuando el admin guarda el resultado real de un slot (bracket_slots
@@ -381,7 +405,7 @@ export async function recalculateUserBracketTotal(supabase: AdminClient, userId:
   const finalSlotRow = slotsList.find((s) => s.id === 'F');
   const realChampion = finalSlotRow?.real_advancer ?? null;
 
-  const extras = calculateUserBracketExtras(resolved, userPredsMap, realChampion);
+  const extras = calculateUserBracketExtras(resolved, slotsList, realChampion);
 
   const bracketTotal = matchPoints + extras.points;
 
