@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { BRACKET_SLOTS_BY_ID } from '@/config/bracket';
+import { recalculateUserBracketTotal } from '@/lib/bracket-engine';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 interface SlotInput {
   slotId: string;
@@ -18,9 +21,12 @@ interface SlotInput {
  * eliminatorias. Pensado para guardar las 32 casillas de golpe, pero
  * también puede mandar un subconjunto.
  *
- * No usa el cliente admin: pasa por RLS, así que respeta automáticamente
- * `bracket_open()` (rechaza el guardado si el admin cerró el cuadro) y
- * que el usuario esté aprobado.
+ * El guardado en sí pasa por RLS (cliente normal), así que respeta
+ * automáticamente `bracket_open()` y que el usuario esté aprobado. Tras
+ * guardar, recalculamos sus puntos con el cliente admin: los extras por
+ * predicción (equipos en cuartos/semis/final) se ganan en el momento de
+ * guardar, no dependen de resultados reales, así que hay que reflejarlos
+ * ya — no esperar al primer resultado cargado por el admin.
  */
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -77,6 +83,18 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  try {
+    const admin = createAdminClient();
+    await recalculateUserBracketTotal(admin, user.id);
+    revalidatePath('/cuadro');
+    revalidatePath('/clasificacion');
+    revalidatePath('/dashboard');
+  } catch (e) {
+    // El guardado de las predicciones ya se confirmó; si falla el recálculo
+    // de puntos no bloqueamos la respuesta, pero lo dejamos constar.
+    console.error('Error recalculando puntos tras guardar bracket:', e);
   }
 
   return NextResponse.json({ ok: true, saved: rows.length });

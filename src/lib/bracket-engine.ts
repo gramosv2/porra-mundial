@@ -6,7 +6,11 @@ import {
   getDescendantSlots,
   type BracketPhase,
 } from '@/config/bracket';
-import { calculateBracketPoints, bracketPredictedWinner } from '@/config/scoring';
+import {
+  calculateBracketPoints,
+  bracketPredictedWinner,
+  SCORING_CONFIG,
+} from '@/config/scoring';
 import type { BracketPrediction, BracketSlot } from '@/types';
 
 type AdminClient = ReturnType<typeof import('./supabase/server').createAdminClient>;
@@ -130,6 +134,75 @@ export function resolveUserBracket(
 
   for (const s of BRACKET_SLOTS) resolve(s.id);
   return resolved;
+}
+
+// ---------------------------------------------------------------------
+// Extras por predicción: puntos que NO dependen de resultados reales
+// (cuartos/semis/final) más el extra de campeón (que sí depende del
+// resultado real de la Final).
+//
+// "Cuartos/semis/final" se entiende como: el equipo que el usuario predijo
+// que JUEGA esa fase, según sus propias elecciones de ronda anterior — se
+// gana en el momento de guardar la predicción, independientemente de si
+// luego esa rama del propio cuadro del usuario fallase o quedase muerta.
+// ---------------------------------------------------------------------
+
+export interface BracketExtras {
+  qfTeams: number; // nº de equipos distintos que el usuario metió en cuartos (0-8)
+  sfTeams: number; // nº de equipos distintos que el usuario metió en semis (0-4)
+  fTeams: number; // nº de equipos distintos que el usuario metió en la final (0-2)
+  championHit: boolean; // si su ganador de la Final coincide con el campeón real
+  points: number; // suma total de los extras anteriores
+}
+
+/**
+ * Calcula los puntos extra de UN usuario a partir de su bracket ya resuelto
+ * (resolveUserBracket) y, si ya se conoce, el campeón real (el real_advancer
+ * del slot 'F').
+ */
+export function calculateUserBracketExtras(
+  resolved: Map<string, ResolvedSlot>,
+  realChampion: string | null
+): BracketExtras {
+  const cfg = SCORING_CONFIG.bracket_advance_bonus;
+
+  // Equipos únicos que el usuario predijo en cada fase (team1 y team2 de
+  // cada casilla de esa fase ya están resueltos según SUS elecciones).
+  const qfTeamSet = new Set<string>();
+  for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
+    const r = resolved.get(s.id);
+    if (r?.team1) qfTeamSet.add(r.team1);
+    if (r?.team2) qfTeamSet.add(r.team2);
+  }
+
+  const sfTeamSet = new Set<string>();
+  for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
+    const r = resolved.get(s.id);
+    if (r?.team1) sfTeamSet.add(r.team1);
+    if (r?.team2) sfTeamSet.add(r.team2);
+  }
+
+  const fTeamSet = new Set<string>();
+  const finalSlot = resolved.get('F');
+  if (finalSlot?.team1) fTeamSet.add(finalSlot.team1);
+  if (finalSlot?.team2) fTeamSet.add(finalSlot.team2);
+
+  const userChampion = finalSlot?.predictedAdvancer ?? null;
+  const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
+
+  const points =
+    qfTeamSet.size * cfg.qf +
+    sfTeamSet.size * cfg.sf +
+    fTeamSet.size * cfg.f +
+    (championHit ? SCORING_CONFIG.bracket_champion_bonus : 0);
+
+  return {
+    qfTeams: qfTeamSet.size,
+    sfTeams: sfTeamSet.size,
+    fTeams: fTeamSet.size,
+    championHit,
+    points,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -263,16 +336,36 @@ async function markBranchDead(supabase: AdminClient, userId: string, slotId: str
     .in('slot_id', slotsToKill);
 }
 
-/** Suma todos los puntos de bracket de un usuario y actualiza profiles.total_points (incremental). */
+/**
+ * Suma todos los puntos de bracket de un usuario (partidos acertados +
+ * extras por predicción: equipos en cuartos/semis/final + campeón) y
+ * actualiza profiles.bracket_points / total_points.
+ */
 export async function recalculateUserBracketTotal(supabase: AdminClient, userId: string) {
   const { data: preds } = await supabase
     .from('bracket_predictions')
-    .select('points_earned, is_dead')
+    .select('*')
     .eq('user_id', userId);
 
-  const bracketTotal = (preds ?? [])
-    .filter((p: any) => !p.is_dead)
-    .reduce((acc: number, p: any) => acc + (p.points_earned ?? 0), 0);
+  const userPredsList = (preds ?? []) as BracketPrediction[];
+
+  const matchPoints = userPredsList
+    .filter((p) => !p.is_dead)
+    .reduce((acc, p) => acc + (p.points_earned ?? 0), 0);
+
+  // Extras por predicción: necesitamos resolver el bracket de este usuario
+  // (equipos según sus propias elecciones) y el campeón real, si ya se sabe.
+  const { data: allSlots } = await supabase.from('bracket_slots').select('*');
+  const slotsList = (allSlots ?? []) as BracketSlot[];
+  const userPredsMap = new Map(userPredsList.map((p) => [p.slot_id, p]));
+  const resolved = resolveUserBracket(slotsList, userPredsMap);
+
+  const finalSlotRow = slotsList.find((s) => s.id === 'F');
+  const realChampion = finalSlotRow?.real_advancer ?? null;
+
+  const extras = calculateUserBracketExtras(resolved, realChampion);
+
+  const bracketTotal = matchPoints + extras.points;
 
   // Sumamos el bracket a lo que ya tenga el usuario de grupos/awards/semis.
   // Para no duplicar en sucesivas llamadas, guardamos el total de bracket

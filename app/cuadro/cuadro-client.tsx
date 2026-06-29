@@ -10,7 +10,7 @@ import {
   T3_USES_LOSERS,
   type BracketPhase,
 } from '@/config/bracket';
-import { bracketPredictedWinner } from '@/config/scoring';
+import { bracketPredictedWinner, SCORING_CONFIG } from '@/config/scoring';
 import { teamES, teamFlag, cn } from '@/lib/utils';
 import { Card, Badge } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -134,6 +134,53 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
     return s;
   }, [myPredictions]);
 
+  // ---------------------------------------------------------------------
+  // Extras por predicción, en vivo: equipos distintos puestos en cada
+  // casilla de cuartos/semis/final (según las elecciones actuales, guardadas
+  // o no) + si el ganador de la Final coincide con el campeón real (si ya
+  // se conoce). Estos puntos se ganan al guardar, no dependen de que la
+  // rama siga viva.
+  // ---------------------------------------------------------------------
+  const extras = useMemo(() => {
+    const qfTeams = new Set<string>();
+    for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
+      const r = resolved.get(def.id);
+      if (r?.team1) qfTeams.add(r.team1);
+      if (r?.team2) qfTeams.add(r.team2);
+    }
+    const sfTeams = new Set<string>();
+    for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
+      const r = resolved.get(def.id);
+      if (r?.team1) sfTeams.add(r.team1);
+      if (r?.team2) sfTeams.add(r.team2);
+    }
+    const fTeams = new Set<string>();
+    const finalResolved = resolved.get('F');
+    if (finalResolved?.team1) fTeams.add(finalResolved.team1);
+    if (finalResolved?.team2) fTeams.add(finalResolved.team2);
+
+    const userChampion = finalResolved?.advancer ?? null;
+    const realChampion = slotsById.get('F')?.real_advancer ?? null;
+    const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
+    const championKnown = !!realChampion;
+
+    const points =
+      qfTeams.size * SCORING_CONFIG.bracket_advance_bonus.qf +
+      sfTeams.size * SCORING_CONFIG.bracket_advance_bonus.sf +
+      fTeams.size * SCORING_CONFIG.bracket_advance_bonus.f +
+      (championHit ? SCORING_CONFIG.bracket_champion_bonus : 0);
+
+    return {
+      qfCount: qfTeams.size,
+      sfCount: sfTeams.size,
+      fCount: fTeams.size,
+      userChampion,
+      championHit,
+      championKnown,
+      points,
+    };
+  }, [resolved, slotsById]);
+
   const totalSlots = BRACKET_SLOTS.length;
   const filledSlots = useMemo(() => {
     let count = 0;
@@ -236,6 +283,61 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
           </span>
         </div>
       )}
+
+      {/* Resumen de puntos extra por predicción */}
+      <Card>
+        <h2 className="font-display text-base font-semibold mb-3">
+          Puntos extra por tu predicción
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <ExtraStat
+            label="Equipos en cuartos"
+            count={extras.qfCount}
+            max={8}
+            perTeam={SCORING_CONFIG.bracket_advance_bonus.qf}
+            subtotal={extras.qfCount * SCORING_CONFIG.bracket_advance_bonus.qf}
+          />
+          <ExtraStat
+            label="Equipos en semis"
+            count={extras.sfCount}
+            max={4}
+            perTeam={SCORING_CONFIG.bracket_advance_bonus.sf}
+            subtotal={extras.sfCount * SCORING_CONFIG.bracket_advance_bonus.sf}
+          />
+          <ExtraStat
+            label="Equipos en la final"
+            count={extras.fCount}
+            max={2}
+            perTeam={SCORING_CONFIG.bracket_advance_bonus.f}
+            subtotal={extras.fCount * SCORING_CONFIG.bracket_advance_bonus.f}
+          />
+          <div className="rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
+            <div className="text-[11px] text-text-muted mb-1">Campeón del Mundial</div>
+            {extras.userChampion ? (
+              <div className="text-sm font-semibold flex items-center gap-1">
+                {teamFlag(extras.userChampion)} {teamES(extras.userChampion)}
+              </div>
+            ) : (
+              <div className="text-sm text-text-muted italic">Sin definir</div>
+            )}
+            <div className="text-[11px] mt-1">
+              {!extras.championKnown ? (
+                <span className="text-text-muted">Aún no se sabe el campeón real</span>
+              ) : extras.championHit ? (
+                <span className="text-accent font-medium">
+                  ✓ Acertado · +{SCORING_CONFIG.bracket_champion_bonus} pts
+                </span>
+              ) : (
+                <span className="text-danger">✕ No coincide con el campeón real</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="mt-3 pt-3 border-t border-border text-sm text-text-muted">
+          Total de extras por ahora:{' '}
+          <span className="font-display font-bold text-text">+{extras.points} pts</span>
+        </div>
+      </Card>
 
       {/* Rondas */}
       {BRACKET_PHASE_ORDER.map((phase) => (
@@ -495,5 +597,31 @@ function SlotCard({
         </div>
       )}
     </Card>
+  );
+}
+
+function ExtraStat({
+  label,
+  count,
+  max,
+  perTeam,
+  subtotal,
+}: {
+  label: string;
+  count: number;
+  max: number;
+  perTeam: number;
+  subtotal: number;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-2/40 px-3 py-2.5">
+      <div className="text-[11px] text-text-muted mb-1">{label}</div>
+      <div className="text-sm font-semibold">
+        {count} / {max}
+      </div>
+      <div className="text-[11px] text-text-muted mt-1">
+        +{perTeam} pts c/u · <span className="text-text font-medium">+{subtotal} pts</span>
+      </div>
+    </div>
   );
 }

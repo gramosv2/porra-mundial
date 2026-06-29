@@ -60,22 +60,33 @@ export const SCORING_CONFIG = {
   lock_hours_before_match: 2,
 
   // --- CUADRO DE ELIMINATORIAS DINÁMICO (dieciseisavos en adelante) ---
-  // Mismo modelo aditivo que arriba (correct_result + exact_bonus opcional),
-  // multiplicado por la fase. Independiente de `phase_multipliers` para no
-  // tocar el sistema antiguo de `matches`/`predictions`.
+  // Mismo modelo aditivo y MISMOS NÚMEROS que group_stage, sin multiplicador
+  // de fase (a diferencia del sistema antiguo de matches/predictions):
+  //   - Aciertas quién pasa de ronda (1X2 o penaltis) → correct_result (3)
+  //   - Además clavas el marcador exacto              → + exact_bonus (2)
+  //   - Fallas                                         → wrong (0)
   bracket: {
-    correct_result: 3, // Acertar quién pasa de ronda (1X2, penaltis si aplica)
-    exact_bonus: 2,     // Extra si además clavas el marcador (90'/120')
+    correct_result: 3,
+    exact_bonus: 2,
     wrong: 0,
-    phase_multipliers: {
-      r16: 1.5, // Dieciseisavos
-      r8: 2,    // Octavos
-      qf: 3,    // Cuartos
-      sf: 4,    // Semifinales
-      t3: 3,    // 3er puesto
-      f: 5,     // Final
-    },
   },
+
+  // --- EXTRAS DEL CUADRO: puntos por predicción, independientes del
+  // resultado real (se ganan en el momento de guardar la predicción) ---
+  // Por cada equipo que el usuario predice llegando a esa fase (sea quien
+  // sea, gane o pierda después en su propio cuadro), suma estos puntos.
+  // Como cada equipo solo puede ocupar una casilla por fase en el cuadro
+  // de un usuario, no hay riesgo de contar el mismo equipo dos veces.
+  bracket_advance_bonus: {
+    qf: 2,  // +2 por cada equipo que metas en cuartos (hasta 8 equipos)
+    sf: 4,  // +4 por cada equipo que metas en semifinales (hasta 4 equipos)
+    f: 8,   // +8 por cada equipo que metas en la final (hasta 2 equipos)
+  },
+
+  // --- EXTRA: ganador del Mundial ---
+  // Si el equipo que el usuario puso como ganador de la Final coincide con
+  // el campeón real, suma este extra (este sí depende del resultado real).
+  bracket_champion_bonus: 16,
 } as const;
 
 export type Phase = 'grupos' | keyof typeof SCORING_CONFIG.phase_multipliers;
@@ -170,14 +181,14 @@ export function bracketRealWinner(
 }
 
 /**
- * Calcula los puntos de una casilla del bracket.
- * - Acierta quién avanza (1X2 o penaltis) → correct_result × multiplicador
- * - Además clava el marcador a 90'/120'    → + exact_bonus × multiplicador
+ * Calcula los puntos de una casilla del bracket. Mismos números que
+ * group_stage, sin multiplicador de fase:
+ * - Acierta quién avanza (1X2 o penaltis) → correct_result
+ * - Además clava el marcador a 90'/120'    → + exact_bonus
  * - Falla quién avanza                     → 0 (no puede haber acertado el marcador)
  */
 export function calculateBracketPoints(input: BracketScoreInput): number {
   const cfg = SCORING_CONFIG.bracket;
-  const multiplier = cfg.phase_multipliers[input.phase];
 
   const predWinner = bracketPredictedWinner(input.predTeam1, input.predTeam2, input.predPenaltyWinner);
   const realWinner = bracketRealWinner(input.realTeam1, input.realTeam2, input.realPenaltyWinner);
@@ -188,7 +199,7 @@ export function calculateBracketPoints(input: BracketScoreInput): number {
   if (input.predTeam1 === input.realTeam1 && input.predTeam2 === input.realTeam2) {
     points += cfg.exact_bonus;
   }
-  return Math.round(points * multiplier);
+  return points;
 }
 
 // Etiqueta legible de una fase

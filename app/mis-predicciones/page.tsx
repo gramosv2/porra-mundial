@@ -3,9 +3,10 @@ import { createClient } from '@/lib/supabase/server';
 import { MatchCard } from '@/components/match-card';
 import { Badge, Card } from '@/components/ui';
 import { PHASE_LABELS, AWARD_LABELS, SCORING_CONFIG, type Phase } from '@/config/scoring';
+import { BRACKET_SLOTS } from '@/config/bracket';
 import { teamES, teamFlag } from '@/lib/utils';
 import Link from 'next/link';
-import type { Match, Prediction } from '@/types';
+import type { Match, Prediction, BracketPrediction } from '@/types';
 
 export default async function MisPrediccionesPage() {
   const profile = await requireApprovedUser();
@@ -27,6 +28,18 @@ export default async function MisPrediccionesPage() {
     .select('*')
     .eq('user_id', profile.id)
     .order('position', { ascending: true });
+
+  const { data: bracketPreds } = await supabase
+    .from('bracket_predictions')
+    .select('*')
+    .eq('user_id', profile.id);
+
+  const myBracketPreds = (bracketPreds ?? []) as BracketPrediction[];
+  const bracketFilled = myBracketPreds.filter(
+    (p) => p.pred_team1 != null && p.pred_team2 != null
+  ).length;
+  const bracketDead = myBracketPreds.filter((p) => p.is_dead).length;
+  const bracketTotalSlots = BRACKET_SLOTS.length;
 
   const allPreds = (rows ?? []) as Array<Prediction & { matches: Match }>;
   const byPhase = new Map<Phase, typeof allPreds>();
@@ -92,6 +105,48 @@ export default async function MisPrediccionesPage() {
           </div>
         </section>
       ))}
+
+      {/* Cuadro de eliminatorias */}
+      <section className="mb-10">
+        <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
+          <h2 className="font-display text-2xl font-bold">Cuadro de eliminatorias</h2>
+          <Link
+            href="/cuadro"
+            className="inline-flex items-center gap-2 bg-accent text-black font-semibold px-4 py-2 rounded-full text-sm hover:bg-accent/90 transition-all"
+          >
+            Ver / editar mi cuadro →
+          </Link>
+        </div>
+        {bracketFilled > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card className="!p-4">
+              <div className="text-xs text-text-muted uppercase tracking-wide">Casillas rellenas</div>
+              <div className="font-display text-3xl font-bold mt-1">
+                {bracketFilled}/{bracketTotalSlots}
+              </div>
+            </Card>
+            <Card className="!p-4">
+              <div className="text-xs text-text-muted uppercase tracking-wide">Ramas eliminadas</div>
+              <div className="font-display text-3xl font-bold mt-1 text-danger">{bracketDead}</div>
+            </Card>
+            <Card className="!p-4 col-span-2 sm:col-span-2">
+              <div className="text-xs text-text-muted uppercase tracking-wide">Puntos del cuadro</div>
+              <div className="font-display text-3xl font-bold mt-1 text-gold">
+                {profile.bracket_points}
+              </div>
+            </Card>
+          </div>
+        ) : (
+          <Card>
+            <p className="text-sm text-text-muted text-center py-3">
+              Todavía no has rellenado tu cuadro de eliminatorias.{' '}
+              <Link href="/cuadro" className="text-accent hover:underline">
+                Ir al cuadro →
+              </Link>
+            </p>
+          </Card>
+        )}
+      </section>
 
       {/* Semifinalistas */}
       <section className="mb-10">
