@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Card, Avatar, Badge } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -118,6 +119,12 @@ export function UsersClient({ pending, approved }: Props) {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/admin/usuario/${u.id}`}
+                  className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium border border-border text-text-muted hover:text-text hover:border-accent/50 transition-colors"
+                >
+                  Ver predicciones
+                </Link>
                 <Button
                   size="sm"
                   variant="secondary"
