@@ -159,17 +159,32 @@ export interface BracketExtras {
  * Calcula los puntos extra de UN usuario a partir de su bracket ya resuelto
  * (resolveUserBracket) y, si ya se conoce, el campeón real (el real_advancer
  * del slot 'F').
+ *
+ * IMPORTANTE: solo cuenta un equipo en una fase si el usuario REALMENTE
+ * predijo algo en esa casilla concreta (tiene pred_team1/pred_team2
+ * guardados ahí) — no basta con que el sistema ya sepa, por la ronda
+ * anterior, quién jugaría esa fase. "Meter un equipo en cuartos" significa
+ * que el usuario llegó a rellenar la casilla de cuartos, no que su octavos
+ * ya determine el rival de cuartos.
  */
 export function calculateUserBracketExtras(
   resolved: Map<string, ResolvedSlot>,
+  userPreds: Map<string, BracketPrediction>,
   realChampion: string | null
 ): BracketExtras {
   const cfg = SCORING_CONFIG.bracket_advance_bonus;
 
-  // Equipos únicos que el usuario predijo en cada fase (team1 y team2 de
-  // cada casilla de esa fase ya están resueltos según SUS elecciones).
+  function hasPrediction(slotId: string): boolean {
+    const p = userPreds.get(slotId);
+    return !!p && p.pred_team1 != null && p.pred_team2 != null;
+  }
+
+  // Equipos únicos que el usuario predijo en cada fase: solo cuenta si la
+  // casilla de ESA fase tiene una predicción guardada (no basta con que el
+  // rival ya se conozca por la ronda anterior).
   const qfTeamSet = new Set<string>();
   for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
+    if (!hasPrediction(s.id)) continue;
     const r = resolved.get(s.id);
     if (r?.team1) qfTeamSet.add(r.team1);
     if (r?.team2) qfTeamSet.add(r.team2);
@@ -177,6 +192,7 @@ export function calculateUserBracketExtras(
 
   const sfTeamSet = new Set<string>();
   for (const s of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
+    if (!hasPrediction(s.id)) continue;
     const r = resolved.get(s.id);
     if (r?.team1) sfTeamSet.add(r.team1);
     if (r?.team2) sfTeamSet.add(r.team2);
@@ -184,10 +200,12 @@ export function calculateUserBracketExtras(
 
   const fTeamSet = new Set<string>();
   const finalSlot = resolved.get('F');
-  if (finalSlot?.team1) fTeamSet.add(finalSlot.team1);
-  if (finalSlot?.team2) fTeamSet.add(finalSlot.team2);
+  if (hasPrediction('F')) {
+    if (finalSlot?.team1) fTeamSet.add(finalSlot.team1);
+    if (finalSlot?.team2) fTeamSet.add(finalSlot.team2);
+  }
 
-  const userChampion = finalSlot?.predictedAdvancer ?? null;
+  const userChampion = hasPrediction('F') ? finalSlot?.predictedAdvancer ?? null : null;
   const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
 
   const points =
@@ -363,7 +381,7 @@ export async function recalculateUserBracketTotal(supabase: AdminClient, userId:
   const finalSlotRow = slotsList.find((s) => s.id === 'F');
   const realChampion = finalSlotRow?.real_advancer ?? null;
 
-  const extras = calculateUserBracketExtras(resolved, realChampion);
+  const extras = calculateUserBracketExtras(resolved, userPredsMap, realChampion);
 
   const bracketTotal = matchPoints + extras.points;
 

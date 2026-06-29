@@ -140,26 +140,39 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
   // o no) + si el ganador de la Final coincide con el campeón real (si ya
   // se conoce). Estos puntos se ganan al guardar, no dependen de que la
   // rama siga viva.
+  //
+  // IMPORTANTE: solo cuenta un equipo en una fase si el usuario realmente
+  // rellenó el marcador de ESA casilla (no basta con que el rival ya se
+  // conozca por haber rellenado la ronda anterior).
   // ---------------------------------------------------------------------
+  function hasLocalScore(slotId: string): boolean {
+    const e = local.get(slotId);
+    return !!e && e.t1 !== '' && e.t2 !== '';
+  }
+
   const extras = useMemo(() => {
     const qfTeams = new Set<string>();
     for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'qf')) {
+      if (!hasLocalScore(def.id)) continue;
       const r = resolved.get(def.id);
       if (r?.team1) qfTeams.add(r.team1);
       if (r?.team2) qfTeams.add(r.team2);
     }
     const sfTeams = new Set<string>();
     for (const def of BRACKET_SLOTS.filter((s) => s.phase === 'sf')) {
+      if (!hasLocalScore(def.id)) continue;
       const r = resolved.get(def.id);
       if (r?.team1) sfTeams.add(r.team1);
       if (r?.team2) sfTeams.add(r.team2);
     }
     const fTeams = new Set<string>();
     const finalResolved = resolved.get('F');
-    if (finalResolved?.team1) fTeams.add(finalResolved.team1);
-    if (finalResolved?.team2) fTeams.add(finalResolved.team2);
+    if (hasLocalScore('F')) {
+      if (finalResolved?.team1) fTeams.add(finalResolved.team1);
+      if (finalResolved?.team2) fTeams.add(finalResolved.team2);
+    }
 
-    const userChampion = finalResolved?.advancer ?? null;
+    const userChampion = hasLocalScore('F') ? finalResolved?.advancer ?? null : null;
     const realChampion = slotsById.get('F')?.real_advancer ?? null;
     const championHit = !!userChampion && !!realChampion && userChampion === realChampion;
     const championKnown = !!realChampion;
@@ -179,7 +192,7 @@ export function CuadroClient({ slots, myPredictions, bracketLocked, userId }: Pr
       championKnown,
       points,
     };
-  }, [resolved, slotsById]);
+  }, [resolved, slotsById, local]);
 
   const totalSlots = BRACKET_SLOTS.length;
   const filledSlots = useMemo(() => {
