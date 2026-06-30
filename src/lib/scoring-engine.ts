@@ -83,6 +83,19 @@ export async function recalculateUserTotals(supabase: AdminClient, userId: strin
     .eq('is_correct', true);
   for (const s of semis ?? []) total += s.points_earned ?? 0;
 
+  // Sumar también los puntos del cuadro de eliminatorias dinámico.
+  // IMPORTANTE: esta función pisaba total_points por completo, borrando sin
+  // querer la contribución del bracket cada vez que se recalculaba algo de
+  // grupos/awards/semis. bracket_points ya está siempre actualizado por
+  // separado (ver recalculateUserBracketTotal en bracket-engine.ts), así
+  // que aquí solo hace falta sumarlo de vuelta al componer el total.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('bracket_points')
+    .eq('id', userId)
+    .single();
+  total += profile?.bracket_points ?? 0;
+
   await supabase
     .from('profiles')
     .update({ total_points: total, exact_scores: exact, correct_results: correct })

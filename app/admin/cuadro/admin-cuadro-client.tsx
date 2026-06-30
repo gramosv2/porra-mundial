@@ -43,6 +43,7 @@ export function AdminCuadroClient({
   const [locked, setLocked] = useState(bracketLocked);
   const [togglingLock, setTogglingLock] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const slotsById = new Map(slots.map((s) => [s.id, s]));
@@ -86,6 +87,26 @@ export function AdminCuadroClient({
     startTransition(() => router.refresh());
   }
 
+  async function repairAllTotals() {
+    if (
+      !confirm(
+        '¿Reparar total_points de TODOS los usuarios? Esto corrige el bug donde el cuadro se borraba de su total tras recalcular grupos/premios. Es seguro ejecutarlo más de una vez.'
+      )
+    )
+      return;
+    setRepairing(true);
+    setMsg(null);
+    const res = await fetch('/api/admin/repair-all-totals', { method: 'POST' });
+    setRepairing(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg('✗ Error: ' + (data.error ?? 'desconocido'));
+      return;
+    }
+    setMsg(`✓ Reparados ${data.repaired} usuarios.`);
+    startTransition(() => router.refresh());
+  }
+
   return (
     <div className="space-y-8 animate-fade-in">
       <Card className="bg-accent/5 border-accent/30 flex items-center justify-between gap-4 flex-wrap">
@@ -117,6 +138,21 @@ export function AdminCuadroClient({
         </div>
         <Button onClick={recalculateAll} disabled={recalculating} variant="secondary">
           {recalculating ? 'Recalculando…' : 'Recalcular todo'}
+        </Button>
+      </Card>
+
+      <Card className="flex items-center justify-between gap-4 flex-wrap border-amber-500/30 bg-amber-500/5">
+        <div>
+          <h2 className="font-display text-lg font-semibold mb-1">
+            Reparar puntos totales (mantenimiento)
+          </h2>
+          <p className="text-sm text-text-muted">
+            Recompone total_points de TODOS los usuarios sumando grupos + premios +
+            semifinalistas + cuadro. Útil si el cuadro había desaparecido del ranking.
+          </p>
+        </div>
+        <Button onClick={repairAllTotals} disabled={repairing} variant="secondary">
+          {repairing ? 'Reparando…' : 'Reparar totales de todos'}
         </Button>
       </Card>
       {msg && (
