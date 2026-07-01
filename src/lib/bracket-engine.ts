@@ -496,8 +496,13 @@ export async function recalculateUserBracketTotal(supabase: AdminClient, userId:
 
   const userPredsList = (preds ?? []) as BracketPrediction[];
 
+  // Sumamos TODOS los points_earned sin filtrar is_dead, porque cada casilla
+  // ya tiene calculados correctamente sus puntos: si la rama está muerta,
+  // points_earned solo incluye el 1X2 y el exacto (si aplican), pero NO el
+  // penalty_bonus (quién pasa). El filtro por is_dead era incorrecto porque
+  // excluía casillas con points_earned > 0 en ramas muertas (ej: 1-1 con
+  // penaltis mal: aciertan el empate y el exacto pero no quién pasa).
   const matchPoints = userPredsList
-    .filter((p) => !p.is_dead)
     .reduce((acc, p) => acc + (p.points_earned ?? 0), 0);
 
   // Extras por predicción: necesitamos resolver el bracket de este usuario
