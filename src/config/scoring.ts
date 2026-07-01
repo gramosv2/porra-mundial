@@ -60,14 +60,21 @@ export const SCORING_CONFIG = {
   lock_hours_before_match: 2,
 
   // --- CUADRO DE ELIMINATORIAS DINÁMICO (dieciseisavos en adelante) ---
-  // Mismo modelo aditivo y MISMOS NÚMEROS que group_stage, sin multiplicador
-  // de fase (a diferencia del sistema antiguo de matches/predictions):
-  //   - Aciertas quién pasa de ronda (1X2 o penaltis) → correct_result (3)
-  //   - Además clavas el marcador exacto              → + exact_bonus (2)
-  //   - Fallas                                         → wrong (0)
+  // Modelo de 3 bonus INDEPENDIENTES y ACUMULABLES:
+  //   1. 1X2 a 90': aciertas si fue victoria/empate/derrota a tiempo reglamentario → correct_result (3)
+  //   2. Exacto: además clavaste el marcador exacto a 90'                          → + exact_bonus (2)
+  //   3. Quién pasa: además acertaste quién avanzó de ronda (penaltis si empate)   → + penalty_bonus (2)
+  //
+  // IMPORTANTE: el bonus 3 (quién pasa) es también lo que determina si la rama
+  // del usuario sigue viva o muere — si fallas quién pasa, rama muerta aunque
+  // hayas acertado el 1X2 y el exacto.
+  //
+  // En partidos sin empate, el bonus 1 y 3 van siempre juntos (no puedes acertar
+  // quién gana sin acertar el 1X2). Solo en empates son independientes.
   bracket: {
-    correct_result: 3,
-    exact_bonus: 2,
+    correct_result: 3,  // 1X2 a 90' acertado
+    exact_bonus: 2,     // Marcador exacto a 90'
+    penalty_bonus: 2,   // Quién pasa de ronda (penaltis si empate)
     wrong: 0,
   },
 

@@ -263,6 +263,13 @@ export function evaluateUserSlot(
   pred: BracketPrediction
 ): SlotEvaluation {
   const chosenTeam = resolvedSlot.predictedAdvancer;
+  const slotRow = allSlots.find((s) => s.id === resolvedSlot.slotId);
+
+  // Si todavía no hay resultado real, no podemos evaluar nada.
+  if (!slotRow || slotRow.status !== 'finished' ||
+      slotRow.result_team1 == null || slotRow.result_team2 == null) {
+    return { advancerAlive: null, exactMatchup: false, points: 0, isDead: false };
+  }
 
   const advancerAlive = isTeamRealAdvancer(state, allSlots, phase, resolvedSlot.slotId, chosenTeam);
 
@@ -270,16 +277,8 @@ export function evaluateUserSlot(
     return { advancerAlive: null, exactMatchup: false, points: 0, isDead: false };
   }
 
-  if (!advancerAlive) {
-    // El equipo que elegiste ya fue eliminado de verdad: 0 puntos, muere.
-    return { advancerAlive: false, exactMatchup: false, points: 0, isDead: true };
-  }
-
-  // Tu equipo sigue vivo de verdad → ganas el 1X2 (correct_result).
-  let points = SCORING_CONFIG.bracket.correct_result;
-
   // ¿El cruce completo (ambos equipos) coincide con el real? Solo entonces
-  // puede haber bonus de marcador exacto.
+  // pueden aplicar los bonus de exacto y penaltis.
   const { team1: realTeam1, team2: realTeam2 } = resolveRealMatchup(allSlots, resolvedSlot.slotId);
   const exactMatchup =
     !!realTeam1 &&
@@ -287,25 +286,72 @@ export function evaluateUserSlot(
     ((resolvedSlot.team1 === realTeam1 && resolvedSlot.team2 === realTeam2) ||
       (resolvedSlot.team1 === realTeam2 && resolvedSlot.team2 === realTeam1));
 
-  if (exactMatchup && pred.pred_team1 != null && pred.pred_team2 != null) {
-    // Orientamos el marcador del usuario al mismo orden que el real para comparar.
-    const userOriented =
-      resolvedSlot.team1 === realTeam1
-        ? { t1: pred.pred_team1, t2: pred.pred_team2 }
-        : { t1: pred.pred_team2, t2: pred.pred_team1 };
+  // Orientamos el marcador del usuario al mismo orden que el resultado real
+  // (team1/team2 del slot), para poder comparar correctamente.
+  const userOriented = exactMatchup
+    ? resolvedSlot.team1 === realTeam1
+      ? { t1: pred.pred_team1!, t2: pred.pred_team2! }
+      : { t1: pred.pred_team2!, t2: pred.pred_team1! }
+    : null;
 
-    const slotRow = allSlots.find((s) => s.id === resolvedSlot.slotId);
-    if (
-      slotRow?.result_team1 != null &&
-      slotRow?.result_team2 != null &&
-      userOriented.t1 === slotRow.result_team1 &&
-      userOriented.t2 === slotRow.result_team2
-    ) {
-      points += SCORING_CONFIG.bracket.exact_bonus;
-    }
+  const realT1 = slotRow.result_team1;
+  const realT2 = slotRow.result_team2;
+  const realIsDrawn = realT1 === realT2;
+
+  let points = 0;
+
+  // ---------------------------------------------------------------
+  // BONUS 1: 1X2 a 90' (victoria local / empate / victoria visitante)
+  // En partidos sin empate: acertar el ganador implica acertar el 1X2.
+  // En partidos con empate: aciertas el 1X2 si también predijiste empate.
+  // ---------------------------------------------------------------
+  const userT1 = userOriented?.t1 ?? pred.pred_team1!;
+  const userT2 = userOriented?.t2 ?? pred.pred_team2!;
+  const userIsDrawn = userT1 === userT2;
+
+  const hit1X2 =
+    exactMatchup && (
+      (!realIsDrawn && !userIsDrawn && Math.sign(userT1 - userT2) === Math.sign(realT1 - realT2)) ||
+      (realIsDrawn && userIsDrawn)
+    );
+
+  if (hit1X2) {
+    points += SCORING_CONFIG.bracket.correct_result;
   }
 
-  return { advancerAlive: true, exactMatchup, points, isDead: false };
+  // ---------------------------------------------------------------
+  // BONUS 2: Marcador exacto a 90'
+  // Solo posible si el cruce coincide y el marcador es exactamente igual.
+  // ---------------------------------------------------------------
+  const hitExact =
+    exactMatchup &&
+    userOriented != null &&
+    userOriented.t1 === realT1 &&
+    userOriented.t2 === realT2;
+
+  if (hitExact) {
+    points += SCORING_CONFIG.bracket.exact_bonus;
+  }
+
+  // ---------------------------------------------------------------
+  // BONUS 3: Quién pasa de ronda (penaltis si hubo empate)
+  // Este bonus es independiente del 1X2 y del exacto.
+  // También determina si la rama sigue viva o muere.
+  // ---------------------------------------------------------------
+  const hitAdvancer = advancerAlive === true;
+
+  if (hitAdvancer) {
+    points += SCORING_CONFIG.bracket.penalty_bonus;
+  }
+
+  // La rama muere si el equipo elegido NO pasó de ronda de verdad.
+  const isDead = !hitAdvancer;
+
+  // Caso especial: si no hay empate en la realidad, el bonus 1 y el 3
+  // van siempre juntos (no puedes acertar quién gana sin acertar el 1X2).
+  // Si el cruce no coincidía (rival distinto), solo aplica el bonus 3.
+
+  return { advancerAlive, exactMatchup, points, isDead };
 }
 
 // ---------------------------------------------------------------------
