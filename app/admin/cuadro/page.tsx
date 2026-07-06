@@ -1,8 +1,9 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 import { AdminCuadroClient } from './admin-cuadro-client';
-import { resolveRealMatchup } from '@/lib/bracket-engine';
-import { BRACKET_SLOTS } from '@/config/bracket';
+import { resolveRealMatchup, readPhaseBonusConfig } from '@/lib/bracket-engine';
+import { BRACKET_SLOTS, BRACKET_PHASE_LABELS } from '@/config/bracket';
+import { SCORING_CONFIG } from '@/config/scoring';
 import type { BracketSlot, BracketPrediction } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -82,13 +83,12 @@ export default async function AdminCuadroPage() {
 
   const slotsList = (slots ?? []) as BracketSlot[];
 
-  // Resolvemos el cruce REAL (equipo1/equipo2) de cada slot a partir de
-  // real_advancer/real_loser de sus slots padre, para que el admin vea
-  // contra quién juega cada uno sin tener que rastrear el árbol a mano.
   const matchups: Record<string, { team1: string | null; team2: string | null }> = {};
   for (const def of BRACKET_SLOTS) {
     matchups[def.id] = resolveRealMatchup(slotsList, def.id);
   }
+
+  const phaseBonusConfig = await readPhaseBonusConfig(admin);
 
   return (
     <AdminCuadroClient
@@ -107,6 +107,8 @@ export default async function AdminCuadroPage() {
         }>
       }
       predsByUserEntries={Array.from(byUser.entries())}
+      phaseBonusConfig={phaseBonusConfig}
+      phaseLabels={BRACKET_PHASE_LABELS}
     />
   );
 }

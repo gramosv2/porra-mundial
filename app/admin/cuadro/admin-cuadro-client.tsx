@@ -28,6 +28,8 @@ interface Props {
   matchups: Record<string, Matchup>;
   profiles: ProfileLite[];
   predsByUserEntries: Array<[string, BracketPrediction[]]>;
+  phaseBonusConfig: Record<string, number>;
+  phaseLabels: Record<string, string>;
 }
 
 export function AdminCuadroClient({
@@ -37,6 +39,8 @@ export function AdminCuadroClient({
   matchups,
   profiles,
   predsByUserEntries,
+  phaseBonusConfig,
+  phaseLabels,
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -45,9 +49,29 @@ export function AdminCuadroClient({
   const [recalculating, setRecalculating] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [bonusConfig, setBonusConfig] = useState<Record<string, number>>(phaseBonusConfig);
+  const [savingBonus, setSavingBonus] = useState(false);
 
   const slotsById = new Map(slots.map((s) => [s.id, s]));
   const predsByUser = useMemo(() => new Map(predsByUserEntries), [predsByUserEntries]);
+
+  async function saveBonus() {
+    setSavingBonus(true);
+    setMsg(null);
+    const res = await fetch('/api/admin/bracket-phase-bonus', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bonus: bonusConfig }),
+    });
+    setSavingBonus(false);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setMsg('✗ Error al guardar bonus: ' + (data.error ?? 'desconocido'));
+      return;
+    }
+    setMsg('✓ Bonus por fase guardados. Pulsa "Recalcular todo" para aplicarlos.');
+    startTransition(() => router.refresh());
+  }
 
   async function toggleLock() {
     const target = !locked;
@@ -154,6 +178,47 @@ export function AdminCuadroClient({
         <Button onClick={repairAllTotals} disabled={repairing} variant="secondary">
           {repairing ? 'Reparando…' : 'Reparar totales de todos'}
         </Button>
+      </Card>
+
+      {/* Bonus por fase configurable */}
+      <Card>
+        <h2 className="font-display text-lg font-semibold mb-1">
+          Bonus por fase — quién pasa de ronda
+        </h2>
+        <p className="text-sm text-text-muted mb-4">
+          Puntos extra que se dan por acertar quién avanza en cada ronda.
+          Tras guardar, pulsa "Recalcular todo" para que se apliquen a todos los usuarios.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+          {(['r16', 'r8', 'qf', 'sf', 't3', 'f'] as const).map((phase) => (
+            <div key={phase} className="flex flex-col gap-1">
+              <label className="text-xs text-text-muted font-medium">
+                {phaseLabels[phase] ?? phase}
+              </label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={bonusConfig[phase] ?? 0}
+                onChange={(e) =>
+                  setBonusConfig((prev) => ({
+                    ...prev,
+                    [phase]: Math.max(0, parseInt(e.target.value, 10) || 0),
+                  }))
+                }
+                className="w-full text-center font-display font-bold text-lg"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <Button onClick={saveBonus} disabled={savingBonus}>
+            {savingBonus ? 'Guardando…' : 'Guardar bonus'}
+          </Button>
+          <span className="text-xs text-text-muted">
+            Recuerda pulsar "Recalcular todo" después para aplicar los cambios.
+          </span>
+        </div>
       </Card>
       {msg && (
         <div
