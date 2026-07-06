@@ -230,13 +230,46 @@ function isTeamRealAdvancer(
   if (!team) return null;
 
   if (phase === 'r16') {
+    // r16: equipos fijos, la "vida" depende del resultado del propio slot.
     const row = allSlots.find((s) => s.id === slotId);
     if (!row || row.status !== 'finished' || !row.real_advancer) return null;
     return row.real_advancer === team;
   }
 
-  if (!state.phaseReady[phase]) return null;
-  return state.advancersByPhase[phase].has(team);
+  // Para fases posteriores: evaluamos en cuanto los DOS feeders concretos
+  // de ESTE slot estén finalizados — no hace falta esperar a que estén
+  // todos los partidos de la ronda (eso era el bug que hacía que slots
+  // ya resolubles se quedaran sin evaluar por culpa de otros pendientes).
+  const def = BRACKET_SLOTS_BY_ID[slotId];
+  if (!def.fromSlot1 || !def.fromSlot2) return null;
+
+  const slotsById = new Map(allSlots.map((s) => [s.id, s]));
+  const feeder1 = slotsById.get(def.fromSlot1);
+  const feeder2 = slotsById.get(def.fromSlot2);
+
+  if (!feeder1 || !feeder2) return null;
+  if (feeder1.status !== 'finished' || feeder2.status !== 'finished') return null;
+  if (!feeder1.real_advancer || !feeder2.real_advancer) return null;
+
+  // El team1 real de este slot es el advancer del feeder1,
+  // el team2 real es el advancer del feeder2 (o loser para T3).
+  const realTeam1 = slotId === 'T3' && T3_USES_LOSERS
+    ? feeder1.real_loser
+    : feeder1.real_advancer;
+  const realTeam2 = slotId === 'T3' && T3_USES_LOSERS
+    ? feeder2.real_loser
+    : feeder2.real_advancer;
+
+  if (!realTeam1 || !realTeam2) return null;
+
+  // ¿El equipo del usuario está en este partido real?
+  if (team !== realTeam1 && team !== realTeam2) return false; // eliminado antes
+
+  // El slot propio también tiene que estar finalizado para saber si avanzó.
+  const slotRow = slotsById.get(slotId);
+  if (!slotRow || slotRow.status !== 'finished' || !slotRow.real_advancer) return null;
+
+  return slotRow.real_advancer === team;
 }
 
 // ---------------------------------------------------------------------
@@ -260,7 +293,8 @@ export function evaluateUserSlot(
   allSlots: BracketSlot[],
   phase: BracketPhase,
   resolvedSlot: ResolvedSlot,
-  pred: BracketPrediction
+  pred: BracketPrediction,
+  phaseBonus: number
 ): SlotEvaluation {
   const chosenTeam = resolvedSlot.predictedAdvancer;
   const slotRow = allSlots.find((s) => s.id === resolvedSlot.slotId);
@@ -277,79 +311,72 @@ export function evaluateUserSlot(
     return { advancerAlive: null, exactMatchup: false, points: 0, isDead: false };
   }
 
-  // ¿El cruce completo (ambos equipos) coincide con el real? Solo entonces
-  // pueden aplicar los bonus de exacto y penaltis.
+  // La rama muere si el equipo elegido NO pasó de ronda de verdad.
+  const isDead = !advancerAlive;
+
+  // ¿El equipo elegido por el usuario está en el partido real?
+  // (puede ser team1 o team2 del resultado real, según quién sea el real_advancer/loser)
   const { team1: realTeam1, team2: realTeam2 } = resolveRealMatchup(allSlots, resolvedSlot.slotId);
-  const exactMatchup =
-    !!realTeam1 &&
-    !!realTeam2 &&
-    ((resolvedSlot.team1 === realTeam1 && resolvedSlot.team2 === realTeam2) ||
-      (resolvedSlot.team1 === realTeam2 && resolvedSlot.team2 === realTeam1));
-
-  // Orientamos el marcador del usuario al mismo orden que el resultado real
-  // (team1/team2 del slot), para poder comparar correctamente.
-  const userOriented = exactMatchup
-    ? resolvedSlot.team1 === realTeam1
-      ? { t1: pred.pred_team1!, t2: pred.pred_team2! }
-      : { t1: pred.pred_team2!, t2: pred.pred_team1! }
-    : null;
-
   const realT1 = slotRow.result_team1;
   const realT2 = slotRow.result_team2;
-  const realIsDrawn = realT1 === realT2;
+
+  // ¿El equipo del usuario (su ganador predicho) está presente en el cruce real?
+  // Solo si está presente podemos comparar el marcador desde su perspectiva.
+  const userTeamIsRealTeam1 = !!chosenTeam && chosenTeam === realTeam1;
+  const userTeamIsRealTeam2 = !!chosenTeam && chosenTeam === realTeam2;
+  const userTeamInRealMatch = userTeamIsRealTeam1 || userTeamIsRealTeam2;
+
+  // Marcador real orientado desde la perspectiva del equipo del usuario:
+  // "mi equipo marcó X, el rival marcó Y"
+  const myGoals = userTeamIsRealTeam1 ? realT1 : realT2;
+  const rivalGoals = userTeamIsRealTeam1 ? realT2 : realT1;
+
+  // Marcador predicho orientado también desde la perspectiva del equipo:
+  // El usuario puso su equipo como team1 o team2 según su propio cruce.
+  const userChoseTeam1 = resolvedSlot.team1 === chosenTeam;
+  const myPredGoals = userChoseTeam1 ? pred.pred_team1! : pred.pred_team2!;
+  const rivalPredGoals = userChoseTeam1 ? pred.pred_team2! : pred.pred_team1!;
 
   let points = 0;
+  let exactMatchup = false;
 
-  // ---------------------------------------------------------------
-  // BONUS 1: 1X2 a 90' (victoria local / empate / victoria visitante)
-  // En partidos sin empate: acertar el ganador implica acertar el 1X2.
-  // En partidos con empate: aciertas el 1X2 si también predijiste empate.
-  // ---------------------------------------------------------------
-  const userT1 = userOriented?.t1 ?? pred.pred_team1!;
-  const userT2 = userOriented?.t2 ?? pred.pred_team2!;
-  const userIsDrawn = userT1 === userT2;
+  if (userTeamInRealMatch) {
+    // ---------------------------------------------------------------
+    // BONUS 1: 1X2 a 90'
+    // Desde la perspectiva del equipo del usuario:
+    // - Si predijo que su equipo ganaba y ganó de verdad → acierto
+    // - Si predijo empate y fue empate → acierto
+    // - Si predijo que su equipo perdía y perdió → acierto (raro, pero posible)
+    // ---------------------------------------------------------------
+    const realIsDrawn = realT1 === realT2;
+    const userIsDrawn = myPredGoals === rivalPredGoals;
+    const hit1X2 =
+      (realIsDrawn && userIsDrawn) ||
+      (!realIsDrawn && !userIsDrawn &&
+        Math.sign(myPredGoals - rivalPredGoals) === Math.sign(myGoals - rivalGoals));
 
-  const hit1X2 =
-    exactMatchup && (
-      (!realIsDrawn && !userIsDrawn && Math.sign(userT1 - userT2) === Math.sign(realT1 - realT2)) ||
-      (realIsDrawn && userIsDrawn)
-    );
+    if (hit1X2) {
+      points += SCORING_CONFIG.bracket.correct_result;
+    }
 
-  if (hit1X2) {
-    points += SCORING_CONFIG.bracket.correct_result;
+    // ---------------------------------------------------------------
+    // BONUS 2: Marcador exacto a 90'
+    // Los goles de mi equipo y del rival coinciden exactamente.
+    // ---------------------------------------------------------------
+    const hitExact = myPredGoals === myGoals && rivalPredGoals === rivalGoals;
+    if (hitExact) {
+      points += SCORING_CONFIG.bracket.exact_bonus;
+      exactMatchup = true;
+    }
   }
 
   // ---------------------------------------------------------------
-  // BONUS 2: Marcador exacto a 90'
-  // Solo posible si el cruce coincide y el marcador es exactamente igual.
+  // BONUS 3: Quién pasa de ronda
+  // Configurable por fase desde admin (phaseBonus).
   // ---------------------------------------------------------------
-  const hitExact =
-    exactMatchup &&
-    userOriented != null &&
-    userOriented.t1 === realT1 &&
-    userOriented.t2 === realT2;
-
-  if (hitExact) {
-    points += SCORING_CONFIG.bracket.exact_bonus;
+  if (advancerAlive) {
+    points += phaseBonus;
   }
-
-  // ---------------------------------------------------------------
-  // BONUS 3: Quién pasa de ronda (penaltis si hubo empate)
-  // Este bonus es independiente del 1X2 y del exacto.
-  // También determina si la rama sigue viva o muere.
-  // ---------------------------------------------------------------
-  const hitAdvancer = advancerAlive === true;
-
-  if (hitAdvancer) {
-    points += SCORING_CONFIG.bracket.penalty_bonus;
-  }
-
-  // La rama muere si el equipo elegido NO pasó de ronda de verdad.
-  const isDead = !hitAdvancer;
-
-  // Caso especial: si no hay empate en la realidad, el bonus 1 y el 3
-  // van siempre juntos (no puedes acertar quién gana sin acertar el 1X2).
-  // Si el cruce no coincidía (rival distinto), solo aplica el bonus 3.
 
   return { advancerAlive, exactMatchup, points, isDead };
 }
@@ -433,6 +460,36 @@ export function calculateUserBracketExtras(
 }
 
 // ---------------------------------------------------------------------
+// Bonus por fase (quién pasa de ronda): configurable desde admin.
+// Se lee de app_settings (key='bracket_phase_bonus'), con fallback a
+// los valores por defecto de SCORING_CONFIG.bracket_phase_bonus_default.
+// ---------------------------------------------------------------------
+
+export type PhaseBonusConfig = Record<BracketPhase, number>;
+
+export async function readPhaseBonusConfig(supabase: AdminClient): Promise<PhaseBonusConfig> {
+  const { data } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'bracket_phase_bonus')
+    .maybeSingle();
+
+  const defaults = SCORING_CONFIG.bracket_phase_bonus_default;
+
+  if (!data?.value || typeof data.value !== 'object') return { ...defaults };
+
+  const val = data.value as Record<string, number>;
+  return {
+    r16: val.r16 ?? defaults.r16,
+    r8: val.r8 ?? defaults.r8,
+    qf: val.qf ?? defaults.qf,
+    sf: val.sf ?? defaults.sf,
+    t3: val.t3 ?? defaults.t3,
+    f: val.f ?? defaults.f,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Recálculo: con el nuevo modelo, una casilla concreta solo puede
 // evaluarse de forma fiable recalculando TODO el bracket del usuario
 // (la vida de su equipo puede depender de resultados de otras ramas).
@@ -448,7 +505,8 @@ async function recalculateOneUserBracket(
   userId: string,
   allSlots: BracketSlot[],
   state: RealLifeState,
-  userPreds: Map<string, BracketPrediction>
+  userPreds: Map<string, BracketPrediction>,
+  phaseBonusConfig: PhaseBonusConfig
 ): Promise<number> {
   const resolved = resolveUserBracket(allSlots, userPreds);
   let total = 0;
@@ -459,13 +517,11 @@ async function recalculateOneUserBracket(
     if (pred.pred_team1 == null || pred.pred_team2 == null) continue;
 
     const resolvedSlot = resolved.get(def.id);
-    if (!resolvedSlot?.team1 || !resolvedSlot?.team2) continue; // todavía no se sabe el rival
+    if (!resolvedSlot?.team1 || !resolvedSlot?.team2) continue;
 
-    const evalResult = evaluateUserSlot(state, allSlots, def.phase, resolvedSlot, pred);
+    const phaseBonus = phaseBonusConfig[def.phase] ?? 0;
+    const evalResult = evaluateUserSlot(state, allSlots, def.phase, resolvedSlot, pred, phaseBonus);
 
-    // Si todavía no se puede evaluar (la fase no está "lista" en la
-    // realidad), dejamos la predicción como estaba (sin tocar puntos ni
-    // is_dead) — no hay nada que decidir aún.
     if (evalResult.advancerAlive === null) continue;
 
     total += evalResult.points;
@@ -567,20 +623,16 @@ export async function setBracketGlobalLock(supabase: AdminClient, locked: boolea
  * resultado antiguo, o como utilidad de mantenimiento.
  */
 export async function recalculateAllBracketSlots(supabase: AdminClient) {
-  // 1) Resetear is_dead y points_earned de todas las predicciones.
   await supabase
     .from('bracket_predictions')
     .update({ is_dead: false, points_earned: 0 })
     .neq('id', -1);
 
-  // 2) Estado de vida real de los equipos, calculado UNA vez para todos
-  //    los usuarios (es independiente de cualquier predicción).
   const { data: allSlotsRaw } = await supabase.from('bracket_slots').select('*');
   const allSlots = (allSlotsRaw ?? []) as BracketSlot[];
   const state = computeRealLifeState(allSlots);
+  const phaseBonusConfig = await readPhaseBonusConfig(supabase);
 
-  // 3) Recorrer cada usuario, re-evaluar su cuadro completo, y recomponer
-  //    sus puntos totales (partidos + extras).
   const { data: allPredsRaw } = await supabase.from('bracket_predictions').select('*');
   const predsByUser = new Map<string, Map<string, BracketPrediction>>();
   for (const p of (allPredsRaw ?? []) as BracketPrediction[]) {
@@ -589,7 +641,7 @@ export async function recalculateAllBracketSlots(supabase: AdminClient) {
   }
 
   for (const [userId, userPreds] of predsByUser) {
-    await recalculateOneUserBracket(supabase, userId, allSlots, state, userPreds);
+    await recalculateOneUserBracket(supabase, userId, allSlots, state, userPreds, phaseBonusConfig);
     await recalculateUserBracketTotal(supabase, userId);
   }
 }

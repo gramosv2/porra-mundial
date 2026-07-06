@@ -74,8 +74,20 @@ export const SCORING_CONFIG = {
   bracket: {
     correct_result: 3,  // 1X2 a 90' acertado
     exact_bonus: 2,     // Marcador exacto a 90'
-    penalty_bonus: 2,   // Quién pasa de ronda (penaltis si empate)
     wrong: 0,
+  },
+
+  // --- BONUS POR FASE (quién pasa de ronda) ---
+  // Configurable desde /admin/cuadro. Estos son los valores por defecto
+  // que se usan si no hay configuración guardada en app_settings.
+  // El admin puede modificarlos en cualquier momento desde la UI.
+  bracket_phase_bonus_default: {
+    r16: 2,  // Dieciseisavos
+    r8: 4,   // Octavos
+    qf: 6,   // Cuartos
+    sf: 8,   // Semifinales
+    t3: 4,   // 3er puesto
+    f: 10,   // Final
   },
 
   // --- EXTRAS DEL CUADRO: puntos por predicción, independientes del
