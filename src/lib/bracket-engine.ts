@@ -617,6 +617,69 @@ export async function setBracketGlobalLock(supabase: AdminClient, locked: boolea
 }
 
 /**
+ * Recalcula el bracket COMPLETO de UN usuario usando datos ya precalculados
+ * (allSlots, state, phaseBonusConfig) que se calculan UNA vez fuera y se
+ * pasan como parámetros. Así el endpoint por usuario no tiene que releer
+ * bracket_slots ni app_settings en cada llamada.
+ */
+export async function recalculateOneUserFull(
+  supabase: AdminClient,
+  userId: string,
+  allSlots: BracketSlot[],
+  state: RealLifeState,
+  phaseBonusConfig: PhaseBonusConfig
+): Promise<void> {
+  // Resetear solo las predicciones de este usuario
+  await supabase
+    .from('bracket_predictions')
+    .update({ is_dead: false, points_earned: 0 })
+    .eq('user_id', userId);
+
+  const { data: predsRaw } = await supabase
+    .from('bracket_predictions')
+    .select('*')
+    .eq('user_id', userId);
+
+  const userPreds = new Map(
+    ((predsRaw ?? []) as BracketPrediction[]).map((p) => [p.slot_id, p])
+  );
+
+  await recalculateOneUserBracket(supabase, userId, allSlots, state, userPreds, phaseBonusConfig);
+  await recalculateUserBracketTotal(supabase, userId);
+}
+
+/**
+ * Prepara los datos compartidos necesarios para recalcular todos los usuarios
+ * (bracket_slots + RealLifeState + phaseBonusConfig). Se llama UNA sola vez
+ * y se pasan los resultados a recalculateOneUserFull para cada usuario.
+ */
+export async function prepareRecalculationContext(supabase: AdminClient): Promise<{
+  allSlots: BracketSlot[];
+  state: RealLifeState;
+  phaseBonusConfig: PhaseBonusConfig;
+  userIds: string[];
+}> {
+  // Reset global: is_dead y points a 0 para todos
+  await supabase
+    .from('bracket_predictions')
+    .update({ is_dead: false, points_earned: 0 })
+    .neq('id', -1);
+
+  const { data: allSlotsRaw } = await supabase.from('bracket_slots').select('*');
+  const allSlots = (allSlotsRaw ?? []) as BracketSlot[];
+  const state = computeRealLifeState(allSlots);
+  const phaseBonusConfig = await readPhaseBonusConfig(supabase);
+
+  // Solo los userIds únicos que tienen predicciones
+  const { data: userIdsRaw } = await supabase
+    .from('bracket_predictions')
+    .select('user_id');
+  const userIds: string[] = Array.from(new Set((userIdsRaw ?? []).map((r: any) => r.user_id as string)));
+
+  return { allSlots, state, phaseBonusConfig, userIds };
+}
+
+/**
  * Recálculo completo desde cero: para cada usuario, re-evalúa sus 32
  * casillas con el modelo de "vida por equipo" (computeRealLifeState +
  * evaluateUserSlot) y recompone sus puntos totales. Útil tras corregir un

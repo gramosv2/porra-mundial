@@ -47,6 +47,7 @@ export function AdminCuadroClient({
   const [locked, setLocked] = useState(bracketLocked);
   const [togglingLock, setTogglingLock] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [recalcProgress, setRecalcProgress] = useState<{ done: number; total: number } | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [bonusConfig, setBonusConfig] = useState<Record<string, number>>(phaseBonusConfig);
@@ -99,15 +100,39 @@ export function AdminCuadroClient({
   async function recalculateAll() {
     if (!confirm('¿Recalcular todo el cuadro desde cero? Útil tras corregir un resultado.')) return;
     setRecalculating(true);
+    setRecalcProgress(null);
     setMsg(null);
-    const res = await fetch('/api/admin/bracket-recalculate-all', { method: 'POST' });
-    setRecalculating(false);
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setMsg('✗ Error: ' + (data.error ?? 'desconocido'));
+
+    // Paso 1: reset global + obtener lista de usuarios
+    const prepRes = await fetch('/api/admin/recalculate-prepare', { method: 'POST' });
+    if (!prepRes.ok) {
+      const data = await prepRes.json().catch(() => ({}));
+      setMsg('✗ Error en preparación: ' + (data.error ?? 'desconocido'));
+      setRecalculating(false);
       return;
     }
-    setMsg('✓ Recálculo completo.');
+    const { userIds } = await prepRes.json();
+    const total = userIds.length;
+    setRecalcProgress({ done: 0, total });
+
+    // Paso 2: recalcular usuario a usuario
+    let errors = 0;
+    for (let i = 0; i < userIds.length; i++) {
+      const res = await fetch('/api/admin/recalculate-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userIds[i] }),
+      });
+      if (!res.ok) errors++;
+      setRecalcProgress({ done: i + 1, total });
+    }
+
+    setRecalculating(false);
+    setRecalcProgress(null);
+    setMsg(errors > 0
+      ? `⚠ Recálculo completado con ${errors} error(es).`
+      : '✓ Recálculo completo.'
+    );
     startTransition(() => router.refresh());
   }
 
@@ -161,7 +186,11 @@ export function AdminCuadroClient({
           </p>
         </div>
         <Button onClick={recalculateAll} disabled={recalculating} variant="secondary">
-          {recalculating ? 'Recalculando…' : 'Recalcular todo'}
+          {recalculating
+            ? recalcProgress
+              ? `Recalculando ${recalcProgress.done}/${recalcProgress.total}…`
+              : 'Preparando…'
+            : 'Recalcular todo'}
         </Button>
       </Card>
 

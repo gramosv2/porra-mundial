@@ -1,36 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
-import { recalculateAllBracketSlots, resolveRealMatchup } from '@/lib/bracket-engine';
+import { resolveRealMatchup } from '@/lib/bracket-engine';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 /**
  * POST /api/admin/bracket-save-result
  * Body: { slotId, resultTeam1, resultTeam2, penaltyWinner?, realAdvancer }
- * `realAdvancer` es el NOMBRE del equipo (en inglés, igual que en `matches`)
- * que avanzó realmente de ronda. El sistema calcula solo el perdedor.
  *
- * Guarda el resultado real de una casilla y dispara un recálculo COMPLETO
- * (recalculateAllBracketSlots) en vez de solo este slot. Es necesario para
- * que CORREGIR un resultado ya cargado funcione bien: si antes una rama se
- * marcó muerta por un dato erróneo, al corregirlo debe poder "revivir" —
- * y eso solo lo garantiza recalcular todo desde cero en orden de fases.
+ * Solo guarda el resultado real en bracket_slots — ya NO dispara el
+ * recálculo automático, porque en Vercel Hobby (10s de límite) recalcular
+ * todos los usuarios de golpe causa timeout. El admin debe pulsar
+ * "Recalcular todo" manualmente después de cargar el resultado.
  */
 export async function POST(req: NextRequest) {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
-  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+
   const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, approved')
-    .eq('id', user.id)
-    .single();
+    .from('profiles').select('role, approved').eq('id', user.id).single();
   if (!profile || profile.role !== 'admin' || !profile.approved) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
   }
@@ -62,7 +53,6 @@ export async function POST(req: NextRequest) {
   try {
     const admin = createAdminClient();
 
-    // Validar que realAdvancer es uno de los dos equipos reales de este cruce.
     const { data: allSlots } = await admin.from('bracket_slots').select('*');
     const matchup = resolveRealMatchup(allSlots ?? [], slotId);
     if (
@@ -78,9 +68,7 @@ export async function POST(req: NextRequest) {
     }
     const realLoser =
       matchup.team1 && matchup.team2
-        ? realAdvancer === matchup.team1
-          ? matchup.team2
-          : matchup.team1
+        ? realAdvancer === matchup.team1 ? matchup.team2 : matchup.team1
         : null;
 
     const { error: updErr } = await admin
@@ -96,22 +84,16 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', slotId);
 
-    if (updErr) {
-      return NextResponse.json({ error: updErr.message }, { status: 500 });
-    }
-
-    await recalculateAllBracketSlots(admin);
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
     try {
       revalidatePath('/admin/cuadro');
-      revalidatePath('/cuadro');
-      revalidatePath('/clasificacion');
-      revalidatePath('/dashboard');
-    } catch {
-      // no crítico
-    }
+    } catch { /* no crítico */ }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      notice: 'Resultado guardado. Pulsa "Recalcular todo" para actualizar los puntos.',
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Error' }, { status: 500 });
   }
