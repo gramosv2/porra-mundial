@@ -361,9 +361,17 @@ export function evaluateUserSlot(
 
     // ---------------------------------------------------------------
     // BONUS 2: Marcador exacto a 90'
-    // Los goles de mi equipo y del rival coinciden exactamente.
+    // Solo cuenta si AMBOS equipos coinciden con los reales: tu equipo
+    // ya está confirmado (userTeamInRealMatch = true), pero el RIVAL
+    // también tiene que ser el mismo que en la realidad. Si el rival
+    // que imaginaste era distinto al real, no hay exacto posible aunque
+    // el marcador numérico coincida.
     // ---------------------------------------------------------------
-    const hitExact = myPredGoals === myGoals && rivalPredGoals === rivalGoals;
+    const userRival = userChoseTeam1 ? resolvedSlot.team2 : resolvedSlot.team1;
+    const realRival = userTeamIsRealTeam1 ? realTeam2 : realTeam1;
+    const rivalIsReal = !!userRival && !!realRival && userRival === realRival;
+
+    const hitExact = rivalIsReal && myPredGoals === myGoals && rivalPredGoals === rivalGoals;
     if (hitExact) {
       points += SCORING_CONFIG.bracket.exact_bonus;
       exactMatchup = true;
